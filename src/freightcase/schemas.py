@@ -87,6 +87,7 @@ class Location(BaseModel):
 
 
 class QuoteRequest(BaseModel):
+    mode: Literal["ocean_fcl", "ocean_lcl", "air", "rail", "road", "multimodal"]
     origin: Location
     destination: Location
     incoterm: Incoterm

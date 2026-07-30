@@ -3,11 +3,13 @@ name = "freightcase"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-authors = [
-    { name = "martyn-v", email = "m@rtyn.io" }
-]
+authors = [{ name = "martyn-v", email = "m@rtyn.io" }]
 requires-python = ">=3.14"
 dependencies = [
+    "dotenv>=0.9.9",
+    "langchain>=1.3.14",
+    "langchain-ollama>=1.1.0",
+    "langgraph>=1.2.10",
     "pydantic>=2.13.4",
 ]
 
@@ -19,6 +21,7 @@ requires = ["uv_build>=0.12.0,<0.13.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = [
-    "pytest>=9.1.1",
-]
+dev = ["pytest>=9.1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
