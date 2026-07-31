@@ -91,6 +91,6 @@ class QuoteRequest(BaseModel):
     origin: Location
     destination: Location
     incoterm: Incoterm
-    cargo_lines: list[CargoLine] = Field(
+    cargo: list[CargoLine] = Field(
         min_length=1, description="The cargo lines to be quoted"
     )

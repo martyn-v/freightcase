@@ -1,7 +1,9 @@
+import json
 from dotenv import load_dotenv
 import os
 from langchain_ollama import ChatOllama
 from langchain.messages import SystemMessage, HumanMessage
+from pydantic import ValidationError
 from langchain_core.language_models import BaseChatModel
 from freightcase.schemas import QuoteRequest
 
@@ -10,28 +12,94 @@ load_dotenv()
 DEFAULT_MODEL = os.getenv("AGENT_MODEL", "gemma4:31b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-SYSTEM_PROMPT = """You are an inbox assistant that extracts structured information from emails. Extract the relevant information and return it as a JSON object that conforms to the QuoteRequest schema.
-Extract values exactly as stated in the email. Do not convert units or reformat identifiers; report what the email says."""
+SYSTEM_PROMPT_TEMPLATE = """You are an inbox assistant that extracts structured information from emails. Extract the relevant information and return it as a single JSON object matching this JSON Schema exactly. No prose, no markdown fences.
+
+{schema}
+
+Extract values exactly as stated in the email. Do not convert units or reformat identifiers; report what the email says.
+Output compact single-line JSON with no whitespace. Omit optional fields that are not present in the email rather than emitting null.
+"""
+
+
+class ExtractionError(Exception):
+    """Extraction produced no valid QuoteRequest. Carries structured detail for the repair loop / HITL confidence."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw: str | None = None,
+        validation_error: ValidationError | None = None,
+    ):
+        super().__init__(message)
+        self.raw = raw
+        self.validation_error = validation_error
 
 
 def default_model() -> BaseChatModel:
-    return ChatOllama(model=DEFAULT_MODEL, base_url=OLLAMA_BASE_URL)
+    return ChatOllama(
+        model=DEFAULT_MODEL,
+        base_url=OLLAMA_BASE_URL,
+        temperature=0,
+        num_predict=800,
+        format="json",
+        reasoning=False,
+    )
 
 
 def extract_quote_request(
     email_content: str, model: BaseChatModel | None = None
 ) -> QuoteRequest:
+    """Extract a structured QuoteRequest from raw email text.
+
+    The model is instructed to transcribe values exactly as stated in the
+    email (no unit conversion, no reformatting); all normalization and
+    interpretation happens deterministically in the schema's validators.
+    The JSON Schema is supplied in the system prompt and the response is
+    parsed and validated by us, rather than delegating to
+    `with_structured_output`, so validation failures surface with their
+    structured field errors intact for the repair loop and per-field
+    HITL confidence.
+
+    Args:
+        email_content: Plain-text email body (untrusted input; passed as
+            the human message, never interpolated into instructions).
+        model: Any LangChain chat model. Defaults to the local Ollama
+            model from AGENT_MODEL; inject an API model for eval runs or
+            a fake for tests.
+
+    Returns:
+        A validated QuoteRequest.
+
+    Raises:
+        ExtractionError: If the response is not valid JSON (`.raw` set)
+            or fails schema validation (`.validation_error` carries the
+            Pydantic errors).
+    """
+
     model = model or default_model()
-    model_with_structured_output = model.with_structured_output(
-        QuoteRequest, method="json_schema"
-    )
+    schema = json.dumps(QuoteRequest.model_json_schema())
 
     messages = [
-        SystemMessage(SYSTEM_PROMPT),
+        SystemMessage(SYSTEM_PROMPT_TEMPLATE.format(schema=schema)),
         HumanMessage(email_content),
     ]
 
-    result = model_with_structured_output.invoke(messages)
-    assert isinstance(result, QuoteRequest)
+    response = model.invoke(messages)
+    raw = (
+        response.content if isinstance(response.content, str) else str(response.content)
+    )
 
-    return result
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ExtractionError(f"Model did not return valid JSON: {e}", raw=raw) from e
+
+    try:
+        return QuoteRequest.model_validate(data)
+    except ValidationError as e:
+        raise ExtractionError(
+            f"Extraction failed schema validation with {e.error_count()} error(s)",
+            raw=raw,
+            validation_error=e,
+        ) from e

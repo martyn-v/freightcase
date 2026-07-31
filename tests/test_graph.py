@@ -16,8 +16,13 @@ CASES = {
         "mode": "ocean_fcl",
         "origin_locode": "CNSHA",
         "incoterm_rule": "FOB",
+        "cargo_0_pieces": 18,
         "cargo_0_kg": pytest.approx(997.903),
-    }
+    },
+    "quote_es419_mixed_units": {
+        "cargo_0_pieces": 4,
+        "cargo_0_kg": pytest.approx(1500.0),
+    },
 }
 
 
@@ -28,5 +33,11 @@ def test_extraction(name: str):
     expected = CASES[name]
     if "mode" in expected:
         assert result.mode == expected["mode"]
+    if "origin_locode" in expected:
+        assert result.origin.locode == expected["origin_locode"]
+    if "incoterm_rule" in expected:
+        assert result.incoterm.rule == expected["incoterm_rule"]
     if "cargo_0_kg" in expected:
-        assert result.cargo_lines[0].weight.kg == expected["cargo_0_kg"]
+        assert result.cargo[0].weight.kg == expected["cargo_0_kg"]
+    if "cargo_0_pieces" in expected:
+        assert result.cargo[0].pieces == expected["cargo_0_pieces"]
