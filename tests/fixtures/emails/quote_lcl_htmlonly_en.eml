@@ -1,0 +1,39 @@
+Subject: Rate request - LCL Hamburg to Veracruz
+From: Jonas Weber <j.weber@nordkontor.example.de>
+To: pricing <pricing@globallinklog.example.com>
+Date: Wed, 30 Jul 2025 13:27:00 -0000
+Message-ID: <9f3ab2@nordkontor.example.de>
+Content-Type: multipart/alternative;
+ boundary="===============8943022338000246260=="
+
+--===============8943022338000246260==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body>
+<div style=3D"font-family: Calibri, sans-serif; font-size: 11pt;">
+<p>Dear team,</p>
+<p>We would appreciate your best rate for the following LCL shipment:</p>
+<table border=3D"0" cellpadding=3D"2">
+<tr><td><b>Origin:</b></td><td>Hamburg, Germany (DEHAM)</td></tr>
+<tr><td><b>Destination:</b></td><td>Veracruz, Mexico</td></tr>
+<tr><td><b>Commodity:</b></td><td>Printing machine parts, 3 wooden crates</td=
+></tr>
+<tr><td><b>Weight:</b></td><td>950 kg total</td></tr>
+<tr><td><b>Dimensions:</b></td><td>Each crate 120 x 100 x 90 cm</td></tr>
+<tr><td><b>Incoterm:</b></td><td>CFR Veracruz</td></tr>
+<tr><td><b>Ready:</b></td><td>Week 33</td></tr>
+</table>
+<p>Cargo is non-hazardous. Kindly also advise transit time.</p>
+<p>Mit freundlichen Gr&uuml;&szlig;en / Best regards,<br>
+Jonas Weber<br>
+Nordkontor Spedition GmbH<br>
+<a href=3D"https://www.nordkontor.example.de">www.nordkontor.example.de</a></=
+p>
+<img src=3D"https://www.nordkontor.example.de/sig/logo.png" alt=3D"Nordkontor=
+" width=3D"140">
+</div>
+</body></html>
+
+--===============8943022338000246260==--
