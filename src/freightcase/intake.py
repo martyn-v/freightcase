@@ -1,5 +1,6 @@
 from email import policy
 import email
+from email.message import EmailMessage
 from email.utils import parsedate_to_datetime
 from pydantic import BaseModel
 
@@ -34,6 +35,69 @@ class IntakeResult(BaseModel):
     intake_warnings: list[str]  # everything weird, surfaced not swallowed
 
 
+def _parse_sender(msg: EmailMessage, warnings: list[str]) -> EmailAddress | None:
+    sender = msg.get("from")
+    if sender is None or sender.addresses is None or len(sender.addresses) == 0:
+        warnings.append("Missing or invalid From header")
+        return None
+    return EmailAddress(
+        display_name=sender.addresses[0].display_name,
+        address=sender.addresses[0].addr_spec,
+    )
+
+
+def _parse_subject(msg: EmailMessage, warnings: list[str]) -> str | None:
+    subject = msg.get("subject")
+    if subject is None:
+        warnings.append("Missing Subject header")
+    return subject
+
+
+def _parse_date(msg: EmailMessage, warnings: list[str]) -> datetime | None:
+    date = msg.get("date")
+    if date is None:
+        warnings.append("Missing Date header")
+        return None
+    try:
+        return parsedate_to_datetime(date)
+    except Exception:
+        warnings.append("Invalid Date header")
+        return None
+
+
+def _extract_body_text(msg: EmailMessage, warnings: list[str]) -> str:
+    body = msg.get_body(preferencelist=("plain", "html"))
+    if not body:
+        raise IntakeError("No suitable body part found in the email")
+
+    if body.get_content_type() == "text/html":
+        body_text = BeautifulSoup(body.get_content(), "html.parser").get_text().strip()
+    else:
+        body_text = body.get_content().strip()
+
+    if not body_text:
+        warnings.append("Empty body")
+    return body_text
+
+
+def _extract_attachments(msg: EmailMessage) -> list[EmailAttachment]:
+    attachments = []
+    for part in msg.iter_attachments():
+        filename = part.get_filename()
+        attachments.append(
+            EmailAttachment(
+                filename=filename or "unknown",
+                content_type=part.get_content_type(),
+                size_bytes=len(part.get_content()),
+                content_ref=f"attachments/{filename}"
+                if filename
+                else "attachments/unknown",
+                extracted_text=None,  # Placeholder for future PDF text extraction
+            )
+        )
+    return attachments
+
+
 def parse_eml(raw: bytes) -> IntakeResult:
     """Parse a raw .eml file into an IntakeResult.
 
@@ -45,53 +109,18 @@ def parse_eml(raw: bytes) -> IntakeResult:
     """
     msg = email.message_from_bytes(raw, policy=policy.default)
 
-    warnings = []
-
-    message_id = msg.get("message-id", "")
-
-    sender = msg.get("from")
-    if sender is None or sender.addresses is None or len(sender.addresses) == 0:
-        warnings.append("Missing or invalid From header")
-    else:
-        sender = EmailAddress(
-            display_name=sender.addresses[0].display_name,
-            address=sender.addresses[0].addr_spec,
-        )
-
-    subject = msg.get("subject")
-    if subject is None:
-        warnings.append("Missing Subject header")
-
-    date = msg.get("date")
-    if date is not None:
-        try:
-            date = parsedate_to_datetime(date)
-        except Exception:
-            warnings.append(f"Invalid Date header: {date}")
-            date = None
-    else:
-        warnings.append("Missing Date header")
-
-    body = msg.get_body(preferencelist=("plain", "html"))
-    if not body:
-        raise IntakeError("No suitable body part found in the email")
-
-    body_text = None
-    if body.get_content_type() == "text/plain":
-        body_text = body.get_content()
-    elif body.get_content_type() == "text/html":
-        body_text = BeautifulSoup(body.get_content(), "html.parser").get_text()
-    else:
-        raise IntakeError("No suitable body part found in the email")
-
-    attachments = []
+    warnings: list[str] = []
+    sender = _parse_sender(msg, warnings)
+    subject = _parse_subject(msg, warnings)
+    date = _parse_date(msg, warnings)
+    body_text = _extract_body_text(msg, warnings)
 
     return IntakeResult(
-        message_id=message_id,
+        message_id=msg.get("message-id"),
         subject=subject,
         sender=sender,
         date=date,
         body_text=body_text,
-        attachments=attachments,
+        attachments=_extract_attachments(msg),
         intake_warnings=warnings,
     )
