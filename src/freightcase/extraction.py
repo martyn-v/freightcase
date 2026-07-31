@@ -4,7 +4,7 @@ from langchain.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 from pydantic import ValidationError
 
-from freightcase.graph import default_model
+from freightcase.llm import default_model
 from freightcase.schemas import QuoteRequest
 
 
