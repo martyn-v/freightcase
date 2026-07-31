@@ -41,7 +41,6 @@ def default_model() -> BaseChatModel:
         model=DEFAULT_MODEL,
         base_url=OLLAMA_BASE_URL,
         temperature=0,
-        num_predict=800,
         format="json",
         reasoning=False,
     )

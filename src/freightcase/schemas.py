@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, computed_field, field_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 from typing import Literal
 
 WeightUnit = Literal["kg", "lb", "t", "g"]
@@ -34,6 +34,30 @@ _WEIGHT_UNIT_ALIASES: dict[str, WeightUnit] = {
     "grams": "g",
 }
 
+DimensionUnit = Literal["cm", "m", "in", "ft"]
+
+_TO_CM: dict[DimensionUnit, float] = {
+    "cm": 1.0,
+    "m": 100.0,
+    "in": 2.54,
+    "ft": 30.48,
+}
+
+_DIMENSION_UNIT_ALIASES: dict[str, DimensionUnit] = {
+    "cm": "cm",
+    "centimeter": "cm",
+    "centimeters": "cm",
+    "m": "m",
+    "meter": "m",
+    "meters": "m",
+    "in": "in",
+    "inch": "in",
+    "inches": "in",
+    "ft": "ft",
+    "foot": "ft",
+    "feet": "ft",
+}
+
 
 class Incoterm(BaseModel):
     rule: Literal[
@@ -67,23 +91,94 @@ class Weight(BaseModel):
         return round(self.value * _TO_KG[self.unit], 3)
 
 
+class Dimensions(BaseModel):
+    """Dimensions as stated in the source document. `cm` is the canonical value; downstream code must only ever read `cm`. Converts to cubic meters for volume calculations."""
+
+    length: float = Field(
+        gt=0, description="Numeric value exactly as stated in the email"
+    )
+    width: float = Field(
+        gt=0, description="Numeric value exactly as stated in the email"
+    )
+    height: float = Field(
+        gt=0, description="Numeric value exactly as stated in the email"
+    )
+    unit: DimensionUnit = Field(
+        description="Unit as stated; common aliases are accepted"
+    )
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def normalize_unit(cls, v: str) -> DimensionUnit:
+        key = str(v).strip().lower().rstrip(".")
+        if key not in _DIMENSION_UNIT_ALIASES:
+            raise ValueError(
+                f"Unrecognized dimension unit '{v}'; expected one of {sorted(set(_DIMENSION_UNIT_ALIASES))}"
+            )
+        return _DIMENSION_UNIT_ALIASES[key]
+
+    @computed_field
+    @property
+    def length_cm(self) -> float:
+        return round(self.length * _TO_CM[self.unit], 3)
+
+    @computed_field
+    @property
+    def width_cm(self) -> float:
+        return round(self.width * _TO_CM[self.unit], 3)
+
+    @computed_field
+    @property
+    def height_cm(self) -> float:
+        return round(self.height * _TO_CM[self.unit], 3)
+
+    @computed_field
+    @property
+    def volume_m3(self) -> float:
+        """Volume in cubic meters, rounded to 3 decimal places."""
+        return round(
+            (self.length_cm / 100) * (self.width_cm / 100) * (self.height_cm / 100), 3
+        )
+
+
 class CargoLine(BaseModel):
     description: str
     hs_code_hint: str | None
     pieces: int = Field(gt=0)
     weight: Weight
-    # volume: Volume
-    # dimensions: Dimensions | None
-    # hazmat: HazmatInfo | None
+    dimensions: Dimensions | None
 
 
 class Location(BaseModel):
-    locode: str = Field(
-        min_length=5,
-        max_length=5,
-        description="The UN/LOCODE of the location",
-        examples=["USNYC", "GBLON", "NLRTM", "SGSIN"],
+    """A location as evidenced in the email. Capture what is stated;
+    resolution to a canonical LOCODE is downstream, not the model's job."""
+
+    name: str | None = Field(
+        None,
+        description="Location name exactly as written in the email, e.g. 'Cartagena, Colombia'",
     )
+    locode: str | None = Field(
+        None,
+        pattern=r"^[A-Z]{2}[A-Z2-9]{3}$",
+        description="UN/LOCODE, only if explicitly stated in the email",
+        examples=["USNYC", "NLRTM"],
+    )
+    iata: str | None = Field(
+        None,
+        pattern=r"^[A-Z]{3}$",
+        description="IATA airport code, only if explicitly stated in the email, e.g. 'BOG'",
+    )
+
+    @field_validator("locode", "iata", mode="before")
+    @classmethod
+    def uppercase(cls, v):
+        return v.upper() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def at_least_one(self) -> "Location":
+        if not (self.name or self.locode or self.iata):
+            raise ValueError("Location requires at least one of: name, locode, iata")
+        return self
 
 
 class QuoteRequest(BaseModel):
