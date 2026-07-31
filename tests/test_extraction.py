@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
-from pprint import pprint
-from freightcase.graph import ExtractionError, extract_quote_request
+from freightcase.extraction import extract_quote_request, ExtractionError
+
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
 
