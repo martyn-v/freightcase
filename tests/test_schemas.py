@@ -51,6 +51,12 @@ class TestWeight:
             ("MT", "t"),
             ("tonnes", "t"),
             ("gr", "g"),
+            # Spanish: the model transcribes what the email says (rule 1)
+            ("toneladas", "t"),
+            ("Tonelada", "t"),
+            ("kilogramos", "kg"),
+            ("libras", "lb"),
+            ("gramos", "g"),
         ],
     )
     def test_normalizes_alias(self, raw_unit: str, expected_unit: str):
@@ -91,6 +97,12 @@ class TestDimensions:
             ("in.", "in"),
             ("ft", "ft"),
             ("feet", "ft"),
+            # Spanish transcriptions
+            ("metros", "m"),
+            ("centímetros", "cm"),
+            ("centimetros", "cm"),
+            ("pulgadas", "in"),
+            ("pies", "ft"),
         ],
     )
     def test_normalizes_dimension_alias(self, raw_unit: str, expected_unit: str):

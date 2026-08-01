@@ -3,7 +3,7 @@ from typing import Literal
 
 WeightUnit = Literal["kg", "lb", "t", "g"]
 
-_TO_KG: dict[WeightUnit, float] = {
+_TO_KG: dict[str, float] = {
     "kg": 1.0,
     "lb": 0.45359237,
     "t": 1000.0,  # metric tonne
@@ -32,11 +32,20 @@ _WEIGHT_UNIT_ALIASES: dict[str, WeightUnit] = {
     "gr": "g",
     "gram": "g",
     "grams": "g",
+    # Spanish (LATAM emails are in scope)
+    "tonelada": "t",
+    "toneladas": "t",
+    "kilogramo": "kg",
+    "kilogramos": "kg",
+    "libra": "lb",
+    "libras": "lb",
+    "gramo": "g",
+    "gramos": "g",
 }
 
 DimensionUnit = Literal["cm", "m", "in", "ft"]
 
-_TO_CM: dict[DimensionUnit, float] = {
+_TO_CM: dict[str, float] = {
     "cm": 1.0,
     "m": 100.0,
     "in": 2.54,
@@ -56,6 +65,17 @@ _DIMENSION_UNIT_ALIASES: dict[str, DimensionUnit] = {
     "ft": "ft",
     "foot": "ft",
     "feet": "ft",
+    # Spanish (LATAM emails are in scope)
+    "metro": "m",
+    "metros": "m",
+    "centímetro": "cm",
+    "centímetros": "cm",
+    "centimetro": "cm",
+    "centimetros": "cm",
+    "pulgada": "in",
+    "pulgadas": "in",
+    "pie": "ft",
+    "pies": "ft",
 }
 
 
@@ -73,7 +93,10 @@ class Weight(BaseModel):
     value: float = Field(
         gt=0, description="Numeric value exactly as stated in the email"
     )
-    unit: WeightUnit = Field(description="Unit as stated; common aliases are accepted")
+    # `str`, not the WeightUnit enum: an enum in the prompt schema pressures the
+    # model to convert ("toneladas" -> "t"), which is interpretation. The model
+    # transcribes; normalize_unit maps to canonical or fails loudly (rule 1).
+    unit: str = Field(description="Weight unit exactly as written in the email")
 
     @field_validator("unit", mode="before")
     @classmethod
@@ -103,9 +126,8 @@ class Dimensions(BaseModel):
     height: float = Field(
         gt=0, description="Numeric value exactly as stated in the email"
     )
-    unit: DimensionUnit = Field(
-        description="Unit as stated; common aliases are accepted"
-    )
+    # `str`, not the enum — same transcription rationale as Weight.unit.
+    unit: str = Field(description="Dimension unit exactly as written in the email")
 
     @field_validator("unit", mode="before")
     @classmethod
