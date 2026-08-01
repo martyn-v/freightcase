@@ -154,17 +154,17 @@ class Location(BaseModel):
     resolution to a canonical LOCODE is downstream, not the model's job."""
 
     name: str | None = Field(
-        None,
+        default=None,
         description="Location name exactly as written in the email, e.g. 'Cartagena, Colombia'",
     )
     locode: str | None = Field(
-        None,
+        default=None,
         pattern=r"^[A-Z]{2}[A-Z2-9]{3}$",
         description="UN/LOCODE, only if explicitly stated in the email",
         examples=["USNYC", "NLRTM"],
     )
     iata: str | None = Field(
-        None,
+        default=None,
         pattern=r"^[A-Z]{3}$",
         description="IATA airport code, only if explicitly stated in the email, e.g. 'BOG'",
     )
@@ -185,7 +185,20 @@ class QuoteRequest(BaseModel):
     mode: Literal["ocean_fcl", "ocean_lcl", "air", "rail", "road", "multimodal"]
     origin: Location
     destination: Location
-    incoterm: Incoterm
+    incoterm: Incoterm | None = None
     cargo: list[CargoLine] = Field(
         min_length=1, description="The cargo lines to be quoted"
     )
+
+    def missing_for_quoting(self) -> list[str]:
+        """Deterministic completeness check: field paths that are absent from
+        the email but needed to produce a quote. Distinct from schema validity —
+        a request can be valid yet not quotable. Feeds HITL per-field flags."""
+        missing: list[str] = []
+        if self.incoterm is None:
+            missing.append("incoterm")
+        if self.mode != "ocean_fcl":  # FCL is priced per container; dims implied
+            for i, line in enumerate(self.cargo):
+                if line.dimensions is None:
+                    missing.append(f"cargo.{i}.dimensions")
+        return missing

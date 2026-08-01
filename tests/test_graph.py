@@ -1,5 +1,6 @@
 from pathlib import Path
 from freightcase.graph import graph
+from pprint import pprint
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
 
@@ -15,14 +16,25 @@ def test_graph_e2e():
         }
     )
 
-    intake_result = result["intake_result"]
-    assert intake_result is not None
-    assert intake_result.body_text.startswith("Buenas tardes")
+    pprint(result)
 
-    extraction = result["extraction"]
-    assert extraction is not None
+    intake = result["intake"]
+    assert intake is not None
+    assert intake.body_text.startswith("Buenas tardes")
+
+    results = result["results"]
+
+    assert len(results) == 1
+    assert results[0].function == "quote_request"
+    assert results[0].status == "extracted"
+    assert results[0].output is not None
+
+    # Email states an incoterm but no dimensions: road mode requires dims.
+    assert results[0].missing == ["cargo.0.dimensions"]
+
+    extraction = results[0].output
+
     assert extraction.mode == "road"
+    assert extraction.incoterm is not None
     assert extraction.incoterm.rule == "DAP"
     assert extraction.cargo[0].weight.kg == 8400
-
-    assert isinstance(result["warnings"], list)

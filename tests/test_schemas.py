@@ -1,7 +1,37 @@
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
-from freightcase.schemas import Dimensions, Weight, Location
+from freightcase.schemas import (
+    CargoLine,
+    Dimensions,
+    Incoterm,
+    Location,
+    QuoteRequest,
+    Weight,
+)
+
+
+def make_quote_request(**overrides: Any) -> QuoteRequest:
+    """A complete, quotable request; tests override the field under test."""
+    fields: dict[str, Any] = dict(
+        mode="air",
+        origin=Location(name="Bogota", iata="BOG"),
+        destination=Location(name="Panama City", iata="PTY"),
+        incoterm=Incoterm(rule="DAP", named_place="Panama City"),
+        cargo=[
+            CargoLine(
+                description="Packed foodstuffs",
+                hs_code_hint=None,
+                pieces=6,
+                weight=Weight(value=480, unit="kg"),
+                dimensions=Dimensions(length=120, width=80, height=75, unit="cm"),
+            )
+        ],
+    )
+    fields.update(overrides)
+    return QuoteRequest(**fields)
 
 
 class TestWeight:
@@ -107,6 +137,67 @@ class TestDimensions:
             {"length": length, "width": width, "height": height, "unit": unit}
         )
         assert d.volume_m3 == pytest.approx(expected_volume_m3, rel=1e-3)
+
+
+class TestMissingForQuoting:
+    def test_complete_request_has_nothing_missing(self):
+        assert make_quote_request().missing_for_quoting() == []
+
+    def test_absent_incoterm_is_flagged(self):
+        qr = make_quote_request(incoterm=None)
+        assert qr.missing_for_quoting() == ["incoterm"]
+
+    def test_absent_dimensions_flagged_with_cargo_line_index(self):
+        qr = make_quote_request(
+            cargo=[
+                CargoLine(
+                    description="Packed foodstuffs",
+                    hs_code_hint=None,
+                    pieces=6,
+                    weight=Weight(value=480, unit="kg"),
+                    dimensions=Dimensions(length=120, width=80, height=75, unit="cm"),
+                ),
+                CargoLine(
+                    description="Machine parts",
+                    hs_code_hint=None,
+                    pieces=2,
+                    weight=Weight(value=900, unit="kg"),
+                    dimensions=None,
+                ),
+            ]
+        )
+        assert qr.missing_for_quoting() == ["cargo.1.dimensions"]
+
+    def test_fcl_does_not_require_dimensions(self):
+        # FCL is priced per container; dimensions are implied by the box.
+        qr = make_quote_request(
+            mode="ocean_fcl",
+            cargo=[
+                CargoLine(
+                    description="Packed foodstuffs",
+                    hs_code_hint=None,
+                    pieces=18,
+                    weight=Weight(value=8400, unit="kg"),
+                    dimensions=None,
+                )
+            ],
+        )
+        assert qr.missing_for_quoting() == []
+
+    def test_multiple_gaps_reported_in_field_order(self):
+        qr = make_quote_request(
+            incoterm=None,
+            cargo=[
+                CargoLine(
+                    description="Machine parts",
+                    hs_code_hint=None,
+                    pieces=2,
+                    weight=Weight(value=900, unit="kg"),
+                    dimensions=None,
+                )
+            ],
+        )
+        assert qr.missing_for_quoting() == ["incoterm", "cargo.0.dimensions"]
 
 
 class TestLocation:
