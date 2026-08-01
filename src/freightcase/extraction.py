@@ -23,6 +23,14 @@ class ExtractionError(Exception):
         self.validation_error = validation_error
 
 
+def _summarize_validation_error(ve: ValidationError) -> str:
+    """Compact field-path summary, e.g. 'cargo.0.weight: Field required'.
+    This lands in SpecialistResult.error, the only detail an ops human sees."""
+    return "; ".join(
+        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in ve.errors()
+    )
+
+
 SYSTEM_PROMPT_TEMPLATE = """You are an inbox assistant that extracts structured information from emails. Extract the relevant information and return it as a single JSON object matching this JSON Schema exactly. No prose, no markdown fences.
 
 {schema}
@@ -84,7 +92,7 @@ def extract_quote_request(
         return QuoteRequest.model_validate(data)
     except ValidationError as e:
         raise ExtractionError(
-            f"Extraction failed schema validation with {e.error_count()} error(s)",
+            f"Extraction failed schema validation: {_summarize_validation_error(e)}",
             raw=raw,
             validation_error=e,
         ) from e

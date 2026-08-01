@@ -1,5 +1,9 @@
+import json
 from pathlib import Path
+
 import pytest
+from langchain_core.language_models import GenericFakeChatModel
+
 from freightcase.extraction import extract_quote_request, ExtractionError
 
 
@@ -134,3 +138,31 @@ def test_missing_weights_fails_loudly():
     ve = exc_info.value.validation_error
     assert ve is not None, "expected schema validation failure, got JSON decode failure"
     assert any("weight" in str(e["loc"]) for e in ve.errors())
+
+
+def test_validation_error_message_names_the_failing_fields():
+    """The error string must be self-explanatory: it feeds SpecialistResult.error,
+    which is all an ops human sees in the dead-letter queue. No LLM: a fake
+    model returns valid JSON that fails schema validation (cargo without weight).
+    """
+    bad = json.dumps(
+        {
+            "mode": "air",
+            "origin": {"name": "Bogota"},
+            "destination": {"name": "Miami"},
+            "cargo": [
+                {
+                    "description": "Cut flowers",
+                    "hs_code_hint": None,
+                    "pieces": 1,
+                    "dimensions": None,
+                }
+            ],
+        }
+    )
+    fake = GenericFakeChatModel(messages=iter([bad]))
+
+    with pytest.raises(ExtractionError) as exc_info:
+        extract_quote_request("irrelevant email body", model=fake)
+
+    assert "cargo.0.weight" in str(exc_info.value)
