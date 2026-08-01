@@ -132,18 +132,24 @@ def test_extraction(name: str):
         assert result.cargo[0].dimensions == expected["cargo_0_dimensions"]
 
 
-def test_missing_weights_fails_loudly():
-    with pytest.raises(ExtractionError) as exc_info:
-        extract_quote_request(load("quote_missing_weights_en"))
-    ve = exc_info.value.validation_error
-    assert ve is not None, "expected schema validation failure, got JSON decode failure"
-    assert any("weight" in str(e["loc"]) for e in ve.errors())
+def test_missing_weights_degrade_not_fail():
+    """Design reversal (was: fatal): absence is degraded, not an error. The
+    email states no weight or dimensions; extraction succeeds with the gaps
+    recorded so HITL can remedy them (rule 3: fatal is for malformed, not
+    incomplete)."""
+    result = extract_quote_request(load("quote_missing_weights_en"))
+
+    assert result.cargo[0].weight is None
+    missing = result.missing_for_quoting()
+    assert "cargo.0.weight" in missing
+    assert "cargo.0.dimensions" in missing
 
 
 def test_validation_error_message_names_the_failing_fields():
     """The error string must be self-explanatory: it feeds SpecialistResult.error,
     which is all an ops human sees in the dead-letter queue. No LLM: a fake
-    model returns valid JSON that fails schema validation (cargo without weight).
+    model returns valid JSON with a malformed value (unknown weight unit) —
+    a form violation, which stays fatal.
     """
     bad = json.dumps(
         {
@@ -153,9 +159,8 @@ def test_validation_error_message_names_the_failing_fields():
             "cargo": [
                 {
                     "description": "Cut flowers",
-                    "hs_code_hint": None,
                     "pieces": 1,
-                    "dimensions": None,
+                    "weight": {"value": 10, "unit": "quintales"},
                 }
             ],
         }
@@ -165,4 +170,4 @@ def test_validation_error_message_names_the_failing_fields():
     with pytest.raises(ExtractionError) as exc_info:
         extract_quote_request("irrelevant email body", model=fake)
 
-    assert "cargo.0.weight" in str(exc_info.value)
+    assert "cargo.0.weight.unit" in str(exc_info.value)

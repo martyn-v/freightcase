@@ -28,18 +28,22 @@ def _location_label(location: Location) -> str:
 
 def _summarize_quote_request(request: QuoteRequest) -> str:
     """One sentence stating what confirming will execute. Composed here so
-    every surface shows the same truth; totals use canonical kg."""
-    pieces = sum(line.pieces for line in request.cargo)
-    kg = sum(line.weight.kg for line in request.cargo)
+    every surface shows the same truth; totals use canonical kg. Unstated
+    fields are named as gaps, never omitted — the human must see them."""
+    mode = request.mode or "mode not stated"
+    stated_pieces = [line.pieces for line in request.cargo if line.pieces is not None]
+    pieces = f"{sum(stated_pieces)} pieces" if stated_pieces else "pieces not stated"
+    stated_kg = [line.weight.kg for line in request.cargo if line.weight is not None]
+    kg = f"{sum(stated_kg):g} kg" if stated_kg else "weight not stated"
     incoterm = (
         f"{request.incoterm.rule} {request.incoterm.named_place}"
         if request.incoterm is not None
         else "incoterm not stated"
     )
     return (
-        f"Create a quote request: {request.mode}, "
+        f"Create a quote request: {mode}, "
         f"{_location_label(request.origin)} → {_location_label(request.destination)}, "
-        f"{pieces} pieces, {kg:g} kg, {incoterm}."
+        f"{pieces}, {kg}, {incoterm}."
     )
 
 

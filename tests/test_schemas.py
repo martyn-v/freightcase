@@ -196,6 +196,23 @@ class TestMissingForQuoting:
         )
         assert qr.missing_for_quoting() == []
 
+    def test_absent_mode_is_flagged(self):
+        qr = make_quote_request(mode=None)
+        assert qr.missing_for_quoting() == ["mode"]
+
+    def test_absent_pieces_and_weight_flagged_per_line(self):
+        qr = make_quote_request(
+            cargo=[
+                CargoLine(
+                    description="Crated lathe",
+                    pieces=None,
+                    weight=None,
+                    dimensions=Dimensions(length=120, width=80, height=75, unit="cm"),
+                )
+            ]
+        )
+        assert qr.missing_for_quoting() == ["cargo.0.pieces", "cargo.0.weight"]
+
     def test_multiple_gaps_reported_in_field_order(self):
         qr = make_quote_request(
             incoterm=None,

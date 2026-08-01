@@ -164,11 +164,15 @@ class Dimensions(BaseModel):
 
 
 class CargoLine(BaseModel):
+    """Absence is degraded, not fatal (rule 3): unstated pieces/weight/dims
+    extract as None and surface via missing_for_quoting() for HITL remedy.
+    Schema validation polices form (bad units, negative values), not absence."""
+
     description: str
-    hs_code_hint: str | None
-    pieces: int = Field(gt=0)
-    weight: Weight
-    dimensions: Dimensions | None
+    hs_code_hint: str | None = None
+    pieces: int | None = Field(default=None, gt=0)
+    weight: Weight | None = None
+    dimensions: Dimensions | None = None
 
 
 class Location(BaseModel):
@@ -204,7 +208,7 @@ class Location(BaseModel):
 
 
 class QuoteRequest(BaseModel):
-    mode: Literal["ocean_fcl", "ocean_lcl", "air", "rail", "road", "multimodal"]
+    mode: Literal["ocean_fcl", "ocean_lcl", "air", "rail", "road", "multimodal"] | None = None
     origin: Location
     destination: Location
     incoterm: Incoterm | None = None
@@ -217,10 +221,17 @@ class QuoteRequest(BaseModel):
         the email but needed to produce a quote. Distinct from schema validity —
         a request can be valid yet not quotable. Feeds HITL per-field flags."""
         missing: list[str] = []
+        if self.mode is None:
+            missing.append("mode")
         if self.incoterm is None:
             missing.append("incoterm")
-        if self.mode != "ocean_fcl":  # FCL is priced per container; dims implied
-            for i, line in enumerate(self.cargo):
-                if line.dimensions is None:
-                    missing.append(f"cargo.{i}.dimensions")
+        for i, line in enumerate(self.cargo):
+            if line.pieces is None:
+                missing.append(f"cargo.{i}.pieces")
+            if line.weight is None:
+                missing.append(f"cargo.{i}.weight")
+            # FCL is priced per container; dims implied. Unknown mode: be
+            # conservative and ask for dims.
+            if self.mode != "ocean_fcl" and line.dimensions is None:
+                missing.append(f"cargo.{i}.dimensions")
         return missing

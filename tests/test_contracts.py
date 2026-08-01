@@ -128,6 +128,31 @@ class TestConfirmationPayload:
 
         assert "incoterm not stated" in summary
 
+    def test_summary_survives_unstated_fields(self):
+        quote_request = QuoteRequest(
+            mode=None,
+            origin=Location(name="Rotterdam"),
+            destination=Location(name="Houston"),
+            incoterm=Incoterm(rule="EXW", named_place="Rotterdam"),
+            cargo=[
+                CargoLine(
+                    description="Crated lathe",
+                    pieces=1,
+                    weight=None,
+                    dimensions=None,
+                )
+            ],
+        )
+        result = SpecialistResult(
+            function="quote_request", output=quote_request, status="extracted"
+        )
+
+        summary = ConfirmationPayload.from_result(result).summary
+
+        assert "mode not stated" in summary
+        assert "weight not stated" in summary
+        assert "Rotterdam" in summary
+
     def test_from_result_requires_output(self):
         result = SpecialistResult(
             function="quote_request", output=None, status="failed"
