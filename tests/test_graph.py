@@ -2,6 +2,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from langchain_core.runnables import RunnableConfig
+from langchain_core.language_models import GenericFakeChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
@@ -72,3 +73,24 @@ def test_graph_rejection_marks_result_rejected():
     assert current.status == "rejected"
     assert current.output is not None  # rejection preserves the extraction
     assert done["current"] is None  # no current result after rejection
+
+
+def test_graph_handles_extraction_error():
+    """If the extraction fails, the graph must not crash; it should produce a
+    SpecialistResult with status=failed and an error message.
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+
+    eml = FIXTURES / "quote_road_plain_es.eml"
+
+    fake = GenericFakeChatModel(messages=iter(["not json {{{"]))
+    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+
+    done = graph.invoke({"eml_file_path": str(eml)}, config=config)
+
+    assert "__interrupt__" not in done
+
+    result = done["results"][0]
+    assert result.status == "failed"
+    assert result.error is not None
+    assert "Model did not return valid JSON" in result.error

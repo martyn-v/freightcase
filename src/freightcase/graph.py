@@ -1,13 +1,15 @@
 from __future__ import annotations
+from functools import partial
 from freightcase.contracts import (
     ConfirmationPayload,
     ConfirmationResume,
     SpecialistResult,
 )
-from freightcase.extraction import extract_quote_request
+from freightcase.extraction import ExtractionError, extract_quote_request
 from freightcase.intake import parse_eml
 import operator
 from typing import Annotated, NotRequired, TypedDict, Literal
+from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import Command, interrupt
 from langgraph.graph import END, START, StateGraph
@@ -29,14 +31,21 @@ def require_current(state: State) -> SpecialistResult:
     return state["current"]
 
 
-def extract_quote(state: State) -> dict:
+def extract_quote(state: State, *, model: BaseChatModel | None = None) -> dict:
     """Extracts the quote request from the intake result and stores it in the state."""
 
     if "intake" not in state or state["intake"] is None:
         raise ValueError("Intake result is missing. Please run intake first.")
 
     # TODO: repair loop on ExtractionError (.raw / .validation_error) instead of failing the run
-    result = extract_quote_request(state["intake"].body_text)
+    try:
+        result = extract_quote_request(state["intake"].body_text, model=model)
+    except ExtractionError as e:
+        return {
+            "current": SpecialistResult(
+                function="quote_request", status="failed", error=str(e), output=None
+            )
+        }
 
     return {
         "current": SpecialistResult(
@@ -46,6 +55,13 @@ def extract_quote(state: State) -> dict:
             missing=result.missing_for_quoting(),
         )
     }
+
+
+def route_after_extract(state: State) -> Literal["confirm", "__end__"]:
+    """If the extraction is complete, go to confirm; if not, leave the subgraph
+    (the parent's finalize graduates current either way)."""
+    current = require_current(state)
+    return "__end__" if current.status == "failed" else "confirm"
 
 
 def confirm(state: State) -> dict:
@@ -87,17 +103,6 @@ def finalize(state: State) -> dict:
     return {"results": [current], "current": None}
 
 
-quote_specialist_builder = StateGraph(State)
-quote_specialist_builder.add_node("extract", extract_quote)
-quote_specialist_builder.add_node("confirm", confirm)
-quote_specialist_builder.add_node("execute", execute)
-quote_specialist_builder.add_edge(START, "extract")
-quote_specialist_builder.add_edge("extract", "confirm")
-quote_specialist_builder.add_conditional_edges("confirm", route_after_confirm)
-quote_specialist_builder.add_edge("execute", END)
-quote_specialist = quote_specialist_builder.compile()
-
-
 def intake(state: State) -> dict:
     """Intake function to parse the .eml file and store the result in the state."""
 
@@ -115,22 +120,34 @@ def classify(state: State) -> Command[Literal["quote_specialist"]]:
     return Command(goto="quote_specialist")
 
 
-builder = StateGraph(State)
-builder.add_node("intake", intake)
-builder.add_node("classify", classify)
-builder.add_node("quote_specialist", quote_specialist)
-builder.add_node("finalize", finalize)
-
-builder.add_edge(START, "intake")
-builder.add_edge("intake", "classify")
-builder.add_edge("quote_specialist", "finalize")
-builder.add_edge("finalize", END)
-
-
-def build_graph(checkpointer: BaseCheckpointSaver | None = None):
+def build_graph(
+    checkpointer: BaseCheckpointSaver | None = None, model: BaseChatModel | None = None
+):
     """Compile the graph. Tests/CLI pass a checkpointer (required for the HITL
     interrupt to resume); the LangGraph API server injects its own, so the
     module-level `graph` compiles bare."""
+
+    quote_specialist_builder = StateGraph(State)
+    quote_specialist_builder.add_node("extract", partial(extract_quote, model=model))
+    quote_specialist_builder.add_node("confirm", confirm)
+    quote_specialist_builder.add_node("execute", execute)
+    quote_specialist_builder.add_edge(START, "extract")
+    quote_specialist_builder.add_conditional_edges("extract", route_after_extract)
+    quote_specialist_builder.add_conditional_edges("confirm", route_after_confirm)
+    quote_specialist_builder.add_edge("execute", END)
+    quote_specialist = quote_specialist_builder.compile()
+
+    builder = StateGraph(State)
+    builder.add_node("intake", intake)
+    builder.add_node("classify", classify)
+    builder.add_node("quote_specialist", quote_specialist)
+    builder.add_node("finalize", finalize)
+
+    builder.add_edge(START, "intake")
+    builder.add_edge("intake", "classify")
+    builder.add_edge("quote_specialist", "finalize")
+    builder.add_edge("finalize", END)
+
     return builder.compile(checkpointer=checkpointer)
 
 
