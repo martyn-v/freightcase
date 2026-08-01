@@ -1,40 +1,74 @@
 from pathlib import Path
-from freightcase.graph import graph
-from pprint import pprint
+from uuid import uuid4
+
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
+
+from freightcase.graph import build_graph
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
 
+# One checkpointed graph for the module; per-test thread_ids keep runs isolated.
+graph = build_graph(checkpointer=InMemorySaver())
 
-def test_graph_e2e():
-    """Pins the graph wiring: intake -> classify -> quote_agent, with state
-    accumulating along the way. Extraction quality is pinned separately in
-    test_extraction.py; assertions here stick to unambiguous fields.
+
+def run_to_pause(config: RunnableConfig) -> dict:
+    """Invoke the graph on the road-freight fixture up to the HITL gate."""
+    eml = FIXTURES / "quote_road_plain_es.eml"
+    return graph.invoke({"eml_file_path": str(eml)}, config=config)
+
+
+def test_graph_pauses_for_confirmation_then_confirms():
+    """Pins the full loop: intake -> classify -> extract -> pause at confirm
+    with the standardized payload -> resume approved -> status flips.
+    Extraction quality is pinned in test_extraction.py; assertions here
+    stick to wiring and unambiguous fields.
     """
-    result = graph.invoke(
-        {
-            "eml_file_path": str(FIXTURES / "quote_road_plain_es.eml"),
-        }
-    )
+    config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
 
-    pprint(result)
+    # Phase 1: run until the HITL gate.
+    paused = run_to_pause(config)
 
-    intake = result["intake"]
+    (pause,) = paused["__interrupt__"]
+    payload = pause.value
+    assert payload["action"] == {"tool": "create_quote", "function": "quote_request"}
+    assert "8400 kg" in payload["summary"]
+    assert payload["missing"] == ["cargo.0.dimensions"]
+
+    # Phase 2: human approves; the run finishes.
+    done = graph.invoke(Command(resume={"approved": True, "edits": {}}), config=config)
+
+    intake = done["intake"]
     assert intake is not None
     assert intake.body_text.startswith("Buenas tardes")
 
-    results = result["results"]
-
-    assert len(results) == 1
-    assert results[0].function == "quote_request"
-    assert results[0].status == "extracted"
-    assert results[0].output is not None
-
+    current = done["results"][0]
+    assert current.function == "quote_request"
+    assert current.status == "executed"
     # Email states an incoterm but no dimensions: road mode requires dims.
-    assert results[0].missing == ["cargo.0.dimensions"]
+    assert current.missing == ["cargo.0.dimensions"]
 
-    extraction = results[0].output
-
+    extraction = current.output
+    assert extraction is not None
     assert extraction.mode == "road"
     assert extraction.incoterm is not None
     assert extraction.incoterm.rule == "DAP"
     assert extraction.cargo[0].weight.kg == 8400
+
+    assert done["current"] is None  # no current result after finalization
+
+
+def test_graph_rejection_marks_result_rejected():
+    """A human declining the confirmation must not look like an approval."""
+    config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+
+    paused = run_to_pause(config)
+    assert "__interrupt__" in paused
+
+    done = graph.invoke(Command(resume={"approved": False}), config=config)
+
+    current = done["results"][0]
+    assert current.status == "rejected"
+    assert current.output is not None  # rejection preserves the extraction
+    assert done["current"] is None  # no current result after rejection

@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "freightcase": "./src/freightcase/graph.py:graph"
+  },
+  "env": ".env"
+}

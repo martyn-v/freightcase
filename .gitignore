@@ -10,3 +10,5 @@ wheels/
 .venv
 .DS_Store
 .vscode/settings.json
+
+.langgraph_api/

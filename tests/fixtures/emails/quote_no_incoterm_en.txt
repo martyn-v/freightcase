@@ -1,0 +1,22 @@
+Subject: Air freight quote - Medellin to Mexico City
+
+Hello,
+
+Please quote air freight for the cargo below:
+
+Origin: Medellin, Colombia (MDE)
+Destination: Mexico City, Mexico (MEX)
+Commodity: Cut flowers, boxed
+Pieces: 10 boxes
+Gross weight: 250 kg
+Dimensions per box: 100 x 50 x 40 cm
+Ready date: August 20, 2026
+
+Temperature controlled not required at this stage.
+
+Kind regards,
+Andres Rojas
+Export Coordinator
+Flora Andina S.A.S.
+arojas@floraandina.example.com
++57 604 555 0198

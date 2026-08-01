@@ -61,6 +61,17 @@ CASES = {
         "cargo_0_dimensions_unit": "cm",
         "cargo_unit_dimensions_volume_m3": pytest.approx(0.72),
     },
+    # Distinct failure mode: no incoterm stated — the model must report absence,
+    # not fabricate one (rule 2). Dimensions present, so incoterm is the only gap.
+    "quote_no_incoterm_en": {
+        "mode": "air",
+        "incoterm": None,
+        "origin_iata": "MDE",
+        "destination_iata": "MEX",
+        "cargo_0_pieces": 10,
+        "cargo_0_kg": pytest.approx(250.0),
+        "missing_for_quoting": ["incoterm"],
+    },
     "quote_imperial_units": {
         "origin_locode": None,
         "origin_iata": "MIA",
@@ -102,8 +113,13 @@ def test_extraction(name: str):
         assert result.destination.iata == expected["destination_iata"]
     if "destination_name" in expected:
         assert result.destination.name == expected["destination_name"]
+    if "incoterm" in expected:
+        assert result.incoterm == expected["incoterm"]
     if "incoterm_rule" in expected:
+        assert result.incoterm is not None
         assert result.incoterm.rule == expected["incoterm_rule"]
+    if "missing_for_quoting" in expected:
+        assert result.missing_for_quoting() == expected["missing_for_quoting"]
     if "cargo_0_kg" in expected:
         assert result.cargo[0].weight.kg == expected["cargo_0_kg"]
     if "cargo_0_pieces" in expected:
