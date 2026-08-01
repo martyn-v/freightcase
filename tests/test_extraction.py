@@ -125,7 +125,9 @@ def test_extraction(name: str):
     if "missing_for_quoting" in expected:
         assert result.missing_for_quoting() == expected["missing_for_quoting"]
     if "cargo_0_kg" in expected:
-        assert result.cargo[0].weight.kg == expected["cargo_0_kg"]
+        weight = result.cargo[0].weight
+        assert weight is not None
+        assert weight.kg == expected["cargo_0_kg"]
     if "cargo_0_pieces" in expected:
         assert result.cargo[0].pieces == expected["cargo_0_pieces"]
     if "cargo_0_dimensions" in expected:
