@@ -61,9 +61,11 @@ def confirm(state: State) -> dict:
     return {"current": current.model_copy(update={"status": status})}
 
 
-def route_after_confirm(state: State) -> Literal["execute", "finalize"]:
+def route_after_confirm(state: State) -> Literal["execute", "__end__"]:
+    """Approved -> execute; rejected -> leave the subgraph (the parent's
+    finalize graduates current either way)."""
     current = require_current(state)
-    return "execute" if current.status == "confirmed" else "finalize"
+    return "execute" if current.status == "confirmed" else "__end__"
 
 
 def execute(state: State) -> dict:
@@ -89,12 +91,10 @@ quote_specialist_builder = StateGraph(State)
 quote_specialist_builder.add_node("extract", extract_quote)
 quote_specialist_builder.add_node("confirm", confirm)
 quote_specialist_builder.add_node("execute", execute)
-quote_specialist_builder.add_node("finalize", finalize)
 quote_specialist_builder.add_edge(START, "extract")
 quote_specialist_builder.add_edge("extract", "confirm")
 quote_specialist_builder.add_conditional_edges("confirm", route_after_confirm)
-quote_specialist_builder.add_edge("execute", "finalize")
-quote_specialist_builder.add_edge("finalize", END)
+quote_specialist_builder.add_edge("execute", END)
 quote_specialist = quote_specialist_builder.compile()
 
 
@@ -119,10 +119,12 @@ builder = StateGraph(State)
 builder.add_node("intake", intake)
 builder.add_node("classify", classify)
 builder.add_node("quote_specialist", quote_specialist)
+builder.add_node("finalize", finalize)
 
 builder.add_edge(START, "intake")
 builder.add_edge("intake", "classify")
-builder.add_edge("quote_specialist", END)
+builder.add_edge("quote_specialist", "finalize")
+builder.add_edge("finalize", END)
 
 
 def build_graph(checkpointer: BaseCheckpointSaver | None = None):
