@@ -12,3 +12,4 @@ wheels/
 .vscode/settings.json
 
 .langgraph_api/
+.env
