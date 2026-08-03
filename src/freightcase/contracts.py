@@ -18,6 +18,16 @@ class SpecialistResult(BaseModel):
     status: Literal["extracted", "confirmed", "executed", "rejected", "failed"]
     warnings: list[str] = []
     error: str | None = None
+    execution_ref: str | None = None
+
+
+# Which MCP tool executes each specialist function. Single source of truth:
+# from_result derives the displayed action from it and the execute node calls
+# through it, so what the human approves is what runs. Grows into the
+# specialist registry.
+TOOL_FOR_FUNCTION: dict[str, Literal["create_quote"]] = {
+    "quote_request": "create_quote",
+}
 
 
 class ConfirmationAction(BaseModel):
@@ -201,7 +211,9 @@ class ConfirmationPayload(BaseModel):
                 f"(status={result.status!r}); failed results have nothing to confirm."
             )
         return ConfirmationPayload(
-            action=ConfirmationAction(tool="create_quote", function=result.function),
+            action=ConfirmationAction(
+                tool=TOOL_FOR_FUNCTION[result.function], function=result.function
+            ),
             summary=_summarize_quote_request(result.output),
             fields=result.output.model_dump(),
             missing=result.missing,

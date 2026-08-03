@@ -2,6 +2,7 @@ from __future__ import annotations
 from functools import partial
 
 from freightcase.contracts import (
+    TOOL_FOR_FUNCTION,
     Confirmed,
     ConfirmationPayload,
     ConfirmationResume,
@@ -11,6 +12,7 @@ from freightcase.contracts import (
     process_resume,
 )
 from pydantic import ValidationError
+from freightcase.execution import StubToolExecutor, ToolExecutor, ToolExecutorError
 from freightcase.extraction import (
     ExtractionError,
     extract_quote_request,
@@ -176,7 +178,7 @@ def route_after_confirm(state: State) -> Literal["execute", "__end__"]:
     return "execute" if current.status == "confirmed" else "__end__"
 
 
-def execute(state: State) -> dict:
+def execute(state: State, *, executor: ToolExecutor) -> dict:
     current = require_current(state)
     if current.status != "confirmed":
         raise ValueError(
@@ -184,9 +186,28 @@ def execute(state: State) -> dict:
             "Please confirm the quote request first."
         )
 
-    # TODO: Implementation of the actual execution logic (e.g., sending the quote request to an external system)
+    if current.output is None:
+        # Routing invariant: confirm never produces a confirmed result
+        # without output. Loud failure means the wiring broke, not the email.
+        raise ValueError("Confirmed result has no output; graph wiring is broken.")
 
-    return {"current": current.model_copy(update={"status": "executed"})}
+    try:
+        # TOOL_FOR_FUNCTION is the same mapping from_result used to build the
+        # displayed action: what the human approved is what runs.
+        result = executor.execute(
+            TOOL_FOR_FUNCTION[current.function], current.output.model_dump()
+        )
+        return {
+            "current": current.model_copy(
+                update={"status": "executed", "execution_ref": result.reference}
+            )
+        }
+    except ToolExecutorError as e:
+        return {
+            "current": current.model_copy(
+                update={"status": "failed", "error": f"Execution failed: {e}"}
+            )
+        }
 
 
 def finalize(state: State) -> dict:
@@ -213,7 +234,9 @@ def classify(state: State) -> Command[Literal["quote_specialist"]]:
 
 
 def build_graph(
-    checkpointer: BaseCheckpointSaver | None = None, model: BaseChatModel | None = None
+    executor: ToolExecutor,
+    checkpointer: BaseCheckpointSaver | None = None,
+    model: BaseChatModel | None = None,
 ):
     """Compile the graph. Tests/CLI pass a checkpointer (required for the HITL
     interrupt to resume); the LangGraph API server injects its own, so the
@@ -222,7 +245,7 @@ def build_graph(
     quote_specialist_builder = StateGraph(State)
     quote_specialist_builder.add_node("extract", partial(extract_quote, model=model))
     quote_specialist_builder.add_node("confirm", confirm)
-    quote_specialist_builder.add_node("execute", execute)
+    quote_specialist_builder.add_node("execute", partial(execute, executor=executor))
     quote_specialist_builder.add_edge(START, "extract")
     quote_specialist_builder.add_conditional_edges("extract", route_after_extract)
     quote_specialist_builder.add_conditional_edges("confirm", route_after_confirm)
@@ -243,4 +266,4 @@ def build_graph(
     return builder.compile(checkpointer=checkpointer)
 
 
-graph = build_graph()
+graph = build_graph(executor=StubToolExecutor())

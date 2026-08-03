@@ -7,12 +7,13 @@ from langchain_core.language_models import GenericFakeChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+from freightcase.execution import StubToolExecutor
 from freightcase.graph import build_graph
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
-
+executor = StubToolExecutor()
 # One checkpointed graph for the module; per-test thread_ids keep runs isolated.
-graph = build_graph(checkpointer=InMemorySaver())
+graph = build_graph(executor=executor, checkpointer=InMemorySaver())
 
 
 def run_to_pause(config: RunnableConfig) -> dict:
@@ -57,7 +58,7 @@ def test_graph_pauses_for_confirmation_then_confirms():
                         "width": 100,
                         "height": 180,
                         "unit": "cm",
-                    }
+                    },
                 },
             }
         ),
@@ -71,6 +72,14 @@ def test_graph_pauses_for_confirmation_then_confirms():
     current = done["results"][0]
     assert current.function == "quote_request"
     assert current.status == "executed"
+    assert current.execution_ref == "Q-STUB-1"
+
+    assert len(executor.calls) == 1
+    assert executor.calls[0][0] == "create_quote"
+    sent = executor.calls[0][1]
+    assert sent["cargo"][0]["weight"]["kg"] == 8400  # canonicals reach the TMS
+    assert sent["origin"]["locode"] == "COBOG"  # human edit reached the TMS
+
     assert current.missing == []
 
     extraction = current.output
@@ -108,7 +117,9 @@ def test_graph_handles_extraction_error():
 
     # Two bad responses: the repair round must also fail for status=failed.
     fake = GenericFakeChatModel(messages=iter(["not json {{{", "still not json"]))
-    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+    graph = build_graph(
+        executor=StubToolExecutor(), checkpointer=InMemorySaver(), model=fake
+    )
 
     done = graph.invoke({"eml_file_path": str(eml)}, config=config)
 
@@ -149,7 +160,9 @@ def test_confirm_reprompts_on_bad_edit_then_accepts_fix():
         }
     )
     fake = GenericFakeChatModel(messages=iter([extraction_json]))
-    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+    graph = build_graph(
+        executor=StubToolExecutor(), checkpointer=InMemorySaver(), model=fake
+    )
 
     eml = FIXTURES / "quote_road_plain_es.eml"
     paused = graph.invoke({"eml_file_path": str(eml)}, config=config)
@@ -224,7 +237,9 @@ def test_malformed_resume_reprompts_instead_of_wedging_the_thread():
         }
     )
     fake = GenericFakeChatModel(messages=iter([extraction_json]))
-    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+    graph = build_graph(
+        executor=StubToolExecutor(), checkpointer=InMemorySaver(), model=fake
+    )
 
     eml = FIXTURES / "quote_road_plain_es.eml"
     paused = graph.invoke({"eml_file_path": str(eml)}, config=config)
@@ -237,9 +252,7 @@ def test_malformed_resume_reprompts_instead_of_wedging_the_thread():
     assert "approved" in payload["problems"][0]
 
     # The thread is still alive: a correct resume completes the run.
-    done = graph.invoke(
-        Command(resume={"approved": True, "edits": {}}), config=config
-    )
+    done = graph.invoke(Command(resume={"approved": True, "edits": {}}), config=config)
     assert "__interrupt__" not in done
     assert done["results"][0].status == "executed"
 
@@ -274,7 +287,9 @@ def test_repair_warning_reaches_payload_and_final_result():
     )
     # First attempt garbage, repair succeeds.
     fake = GenericFakeChatModel(messages=iter(["not json {{{", complete_json]))
-    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+    graph = build_graph(
+        executor=StubToolExecutor(), checkpointer=InMemorySaver(), model=fake
+    )
 
     eml = FIXTURES / "quote_road_plain_es.eml"
     paused = graph.invoke({"eml_file_path": str(eml)}, config=config)
@@ -286,9 +301,7 @@ def test_repair_warning_reaches_payload_and_final_result():
     assert payload["confidence"]["mode"] == "stated"
     assert payload["confidence"]["cargo.0.weight.unit"] == "stated"
 
-    done = graph.invoke(
-        Command(resume={"approved": True, "edits": {}}), config=config
-    )
+    done = graph.invoke(Command(resume={"approved": True, "edits": {}}), config=config)
     assert done["results"][0].warnings == payload["warnings"]
 
 
@@ -320,7 +333,9 @@ def test_confirm_remediates_gaps_across_rounds():
         }
     )
     fake = GenericFakeChatModel(messages=iter([extraction_json]))
-    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+    graph = build_graph(
+        executor=StubToolExecutor(), checkpointer=InMemorySaver(), model=fake
+    )
 
     eml = FIXTURES / "quote_road_plain_es.eml"
     paused = graph.invoke({"eml_file_path": str(eml)}, config=config)
