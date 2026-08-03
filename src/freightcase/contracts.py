@@ -22,6 +22,56 @@ class ConfirmationAction(BaseModel):
     function: Literal["quote_request"]
 
 
+class EditError(ValueError):
+    """A human edit referenced a path that doesn't exist in the request."""
+
+
+def _set_path(data: Any, path: str, value: Any) -> None:
+    """Set `value` at a dotted field path ('incoterm', 'cargo.0.weight') inside
+    a model_dump dict, in place. Unknown paths fail loudly — a typo'd edit
+    must never be silently ignored."""
+    target = data
+    parts = path.split(".")
+    for depth, part in enumerate(parts):
+        last = depth == len(parts) - 1
+        if isinstance(target, list):
+            try:
+                index = int(part)
+            except ValueError:
+                raise EditError(
+                    f"Edit path {path!r}: expected a list index, got {part!r}"
+                ) from None
+            if not 0 <= index < len(target):
+                raise EditError(f"Edit path {path!r}: index {index} out of range")
+            if last:
+                target[index] = value
+            else:
+                target = target[index]
+        elif isinstance(target, dict):
+            if part not in target:
+                raise EditError(f"Edit path {path!r}: unknown field {part!r}")
+            if last:
+                target[part] = value
+            else:
+                target = target[part]
+        else:
+            parent = ".".join(parts[:depth])
+            raise EditError(
+                f"Edit path {path!r}: {parent!r} is not set; edit {parent!r} itself instead"
+            )
+
+
+def apply_edits(original: QuoteRequest, edits: dict[str, Any]) -> QuoteRequest:
+    """Apply human edits keyed by dotted field paths — the same vocabulary as
+    missing_for_quoting() and confidence — then re-validate the whole object.
+    The human is untrusted input like the model (rule 1): a bad value raises
+    ValidationError, a bad path raises EditError; nothing is silently dropped."""
+    data = original.model_dump()
+    for path, value in edits.items():
+        _set_path(data, path, value)
+    return QuoteRequest.model_validate(data)
+
+
 def _location_label(location: Location) -> str:
     return location.name or location.locode or location.iata or "unknown"
 
@@ -56,6 +106,9 @@ class ConfirmationPayload(BaseModel):
     confidence: dict[str, FieldConfidence] = {}
     missing: list[str] = []
     warnings: list[str] = []
+    # Why the human is being asked again (invalid edit, remaining gaps).
+    # Empty on the first interrupt; populated on re-prompts.
+    problems: list[str] = []
 
     @staticmethod
     def from_result(result: SpecialistResult) -> "ConfirmationPayload":

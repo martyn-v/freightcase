@@ -208,7 +208,9 @@ class Location(BaseModel):
 
 
 class QuoteRequest(BaseModel):
-    mode: Literal["ocean_fcl", "ocean_lcl", "air", "rail", "road", "multimodal"] | None = None
+    mode: (
+        Literal["ocean_fcl", "ocean_lcl", "air", "rail", "road", "multimodal"] | None
+    ) = None
     origin: Location
     destination: Location
     incoterm: Incoterm | None = None
@@ -235,3 +237,5 @@ class QuoteRequest(BaseModel):
             if self.mode != "ocean_fcl" and line.dimensions is None:
                 missing.append(f"cargo.{i}.dimensions")
         return missing
+
+

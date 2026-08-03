@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -94,3 +95,77 @@ def test_graph_handles_extraction_error():
     assert result.status == "failed"
     assert result.error is not None
     assert "Model did not return valid JSON" in result.error
+
+
+def test_confirm_reprompts_on_bad_edit_then_accepts_fix():
+    """Pins the edit loop end to end, deterministically (fake model, no LLM):
+    pause -> approve with an invalid edit -> re-prompt carries `problems` ->
+    approve with a valid edit -> executed, gap filled, missing recomputed.
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+
+    # Valid extraction with exactly one gap: weight unstated.
+    extraction_json = json.dumps(
+        {
+            "mode": "road",
+            "origin": {"name": "Rotterdam"},
+            "destination": {"name": "Houston"},
+            "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
+            "cargo": [
+                {
+                    "description": "Crated lathe",
+                    "pieces": 1,
+                    "dimensions": {
+                        "length": 200,
+                        "width": 120,
+                        "height": 150,
+                        "unit": "cm",
+                    },
+                }
+            ],
+        }
+    )
+    fake = GenericFakeChatModel(messages=iter([extraction_json]))
+    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+
+    eml = FIXTURES / "quote_road_plain_es.eml"
+    paused = graph.invoke({"eml_file_path": str(eml)}, config=config)
+
+    (pause,) = paused["__interrupt__"]
+    assert pause.value["missing"] == ["cargo.0.weight"]
+    assert pause.value["problems"] == []
+
+    # Human approves but supplies a malformed weight: must re-prompt, not crash.
+    reprompted = graph.invoke(
+        Command(
+            resume={
+                "approved": True,
+                "edits": {"cargo.0.weight": {"value": 10, "unit": "quintales"}},
+            }
+        ),
+        config=config,
+    )
+
+    (pause,) = reprompted["__interrupt__"]
+    assert pause.value["problems"] != []
+    assert "quintales" in pause.value["problems"][0]
+
+    # Valid fix: run completes, edit lands in the executed result.
+    done = graph.invoke(
+        Command(
+            resume={
+                "approved": True,
+                "edits": {"cargo.0.weight": {"value": 1.2, "unit": "toneladas"}},
+            }
+        ),
+        config=config,
+    )
+
+    assert "__interrupt__" not in done
+    result = done["results"][0]
+    assert result.status == "executed"
+    assert result.missing == []
+    assert result.output is not None
+    weight = result.output.cargo[0].weight
+    assert weight is not None
+    assert weight.kg == 1200

@@ -23,7 +23,7 @@ class ExtractionError(Exception):
         self.validation_error = validation_error
 
 
-def _summarize_validation_error(ve: ValidationError) -> str:
+def summarize_validation_error(ve: ValidationError) -> str:
     """Compact field-path summary, e.g. 'cargo.0.weight: Field required'.
     This lands in SpecialistResult.error, the only detail an ops human sees."""
     return "; ".join(
@@ -92,7 +92,7 @@ def extract_quote_request(
         return QuoteRequest.model_validate(data)
     except ValidationError as e:
         raise ExtractionError(
-            f"Extraction failed schema validation: {_summarize_validation_error(e)}",
+            f"Extraction failed schema validation: {summarize_validation_error(e)}",
             raw=raw,
             validation_error=e,
         ) from e

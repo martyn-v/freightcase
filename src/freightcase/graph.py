@@ -1,11 +1,19 @@
 from __future__ import annotations
 from functools import partial
+
+from pydantic import ValidationError
 from freightcase.contracts import (
     ConfirmationPayload,
     ConfirmationResume,
+    EditError,
     SpecialistResult,
+    apply_edits,
 )
-from freightcase.extraction import ExtractionError, extract_quote_request
+from freightcase.extraction import (
+    ExtractionError,
+    extract_quote_request,
+    summarize_validation_error,
+)
 from freightcase.intake import parse_eml
 import operator
 from typing import Annotated, NotRequired, TypedDict, Literal
@@ -14,6 +22,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import Command, interrupt
 from langgraph.graph import END, START, StateGraph
 from freightcase.intake import IntakeResult
+from freightcase.schemas import QuoteRequest
 
 
 class State(TypedDict):
@@ -66,15 +75,37 @@ def route_after_extract(state: State) -> Literal["confirm", "__end__"]:
 
 def confirm(state: State) -> dict:
     current = require_current(state)
+
     payload = ConfirmationPayload.from_result(current)
+    output: QuoteRequest = current.output  # type: ignore (we know it's not None because from_result would have raised otherwise)
 
-    confirmation = ConfirmationResume.model_validate(interrupt(payload.model_dump()))
+    while True:
+        resume = ConfirmationResume.model_validate(interrupt(payload.model_dump()))
+        if not resume.approved:
+            return {"current": current.model_copy(update={"status": "rejected"})}
 
-    # TODO: apply confirmation.edits (re-validate via QuoteRequest.model_validate)
+        try:
+            edited = apply_edits(output, resume.edits)
+        except EditError as e:
+            payload = payload.model_copy(update={"problems": [str(e)]})
+            continue
+        except ValidationError as e:
+            payload = payload.model_copy(
+                update={"problems": [summarize_validation_error(e)]}
+            )
+            continue
 
-    status = "confirmed" if confirmation.approved else "rejected"
+        # TODO: check if edited has missing fields for quoting; if so, return to the user for further edits instead of confirming
 
-    return {"current": current.model_copy(update={"status": status})}
+        return {
+            "current": current.model_copy(
+                update={
+                    "status": "confirmed",
+                    "output": edited,
+                    "missing": edited.missing_for_quoting(),
+                }
+            )
+        }
 
 
 def route_after_confirm(state: State) -> Literal["execute", "__end__"]:
