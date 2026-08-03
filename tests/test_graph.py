@@ -343,9 +343,12 @@ def test_confirm_remediates_gaps_across_rounds():
     payload = reprompted["__interrupt__"][0].value
     assert payload["problems"] == ["Still missing: incoterm"]
     assert payload["missing"] == ["incoterm"]
-    # The weight fix is visible in the re-prompt: fields and summary updated.
+    # The weight fix is visible in the re-prompt: fields and summary updated,
+    # and provenance already shows the human supplied it.
     assert payload["fields"]["cargo"][0]["weight"]["kg"] == 950
     assert "950 kg" in payload["summary"]
+    assert payload["confidence"]["cargo.0.weight"] == "edited"
+    assert "cargo.0.weight.unit" not in payload["confidence"]
 
     # Round 2: fix only the incoterm - the weight edit must have stuck.
     done = graph.invoke(
@@ -368,3 +371,7 @@ def test_confirm_remediates_gaps_across_rounds():
     weight = result.output.cargo[0].weight
     assert weight is not None
     assert weight.kg == 950
+    # Provenance accumulated across both rounds survives into the final result.
+    assert result.confidence["cargo.0.weight"] == "edited"
+    assert result.confidence["incoterm"] == "edited"
+    assert result.confidence["mode"] == "stated"

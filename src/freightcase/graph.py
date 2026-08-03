@@ -7,6 +7,7 @@ from freightcase.contracts import (
     ConfirmationResume,
     Rejected,
     SpecialistResult,
+    overlay_edited,
     process_resume,
 )
 from pydantic import ValidationError
@@ -109,6 +110,9 @@ def confirm(state: State) -> dict:
 
     # First prompt: no problems, payload reflects the extraction as-is.
     payload = ConfirmationPayload.from_result(current)
+    # Edit paths the human has successfully applied across rounds; their
+    # confidence entries become "edited" (provenance: human, not email).
+    applied: set[str] = set()
 
     while True:
         # Pause here. The resume value is untrusted human input: validate it
@@ -135,12 +139,14 @@ def confirm(state: State) -> dict:
         if isinstance(decision, Confirmed):
             # `confirmed` implies complete (process_resume enforces it), so
             # missing is [] by construction and execute needs no re-check.
+            applied.update(decision.edited_paths)
             return {
                 "current": current.model_copy(
                     update={
                         "status": "confirmed",
                         "output": decision.edited,
                         "missing": [],
+                        "confidence": overlay_edited(current.confidence, applied),
                     }
                 )
             }
@@ -148,12 +154,17 @@ def confirm(state: State) -> dict:
         # Reprompt: carry forward whatever process_resume decided survives
         # (original output if the edits were bad, edited output if they were
         # valid but incomplete), and rebuild the payload from it so the human
-        # sees their accepted progress — fields, summary and missing update;
-        # problems says why they're being asked again.
+        # sees their accepted progress — fields, summary, missing and
+        # confidence update; problems says why they're being asked again.
         output = decision.output
+        applied.update(decision.edited_paths)
         payload = ConfirmationPayload.from_result(
             current.model_copy(
-                update={"output": output, "missing": output.missing_for_quoting()}
+                update={
+                    "output": output,
+                    "missing": output.missing_for_quoting(),
+                    "confidence": overlay_edited(current.confidence, applied),
+                }
             )
         ).model_copy(update={"problems": decision.problems})
 

@@ -3,8 +3,9 @@ from typing import Literal
 
 # Per-field provenance: what the human can trust about each extracted value.
 # Deterministic, not model-emitted (rule 1): "normalized" means a validator
-# changed what the model transcribed.
-FieldConfidence = Literal["stated", "normalized", "missing"]
+# changed what the model transcribed; "edited" means the value came from the
+# human at the confirmation gate, not from the email at all.
+FieldConfidence = Literal["stated", "normalized", "missing", "edited"]
 
 WeightUnit = Literal["kg", "lb", "t", "g"]
 

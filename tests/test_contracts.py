@@ -10,15 +10,17 @@ from freightcase.contracts import (
     Reprompt,
     SpecialistResult,
     apply_edits,
+    overlay_edited,
     process_resume,
 )
 from freightcase.schemas import (
     CargoLine,
+    Dimensions,
+    FieldConfidence,
     Incoterm,
     Location,
     QuoteRequest,
     Weight,
-    Dimensions,
 )
 
 
@@ -74,6 +76,32 @@ class TestApplyEdits:
         assert original.mode is None
 
 
+class TestOverlayEdited:
+    def test_marks_edited_and_keeps_the_rest(self):
+        conf: dict[str, FieldConfidence] = {
+            "mode": "stated",
+            "cargo.0.weight": "missing",
+            "cargo.0.pieces": "stated",
+        }
+        out = overlay_edited(conf, ["cargo.0.weight"])
+        assert out["cargo.0.weight"] == "edited"
+        assert out["mode"] == "stated"
+        assert out["cargo.0.pieces"] == "stated"
+
+    def test_collapses_leaf_entries_beneath_the_edited_path(self):
+        conf: dict[str, FieldConfidence] = {
+            "cargo.0.weight.unit": "normalized",
+            "cargo.0.weight.value": "stated",
+        }
+        out = overlay_edited(conf, ["cargo.0.weight"])
+        assert out == {"cargo.0.weight": "edited"}
+
+    def test_does_not_mutate_input(self):
+        conf: dict[str, FieldConfidence] = {"mode": "missing"}
+        overlay_edited(conf, ["mode"])
+        assert conf == {"mode": "missing"}
+
+
 class TestProcessResume:
     """The confirm node's pure per-resume decision logic, tested without any
     graph machinery. The node itself is a thin interrupt loop over this."""
@@ -91,6 +119,7 @@ class TestProcessResume:
         assert isinstance(decision, Reprompt)
         assert "incotrem" in decision.problems[0]
         assert decision.output is original  # rejected wholesale, nothing sticks
+        assert decision.edited_paths == ()  # nothing applied, nothing marked
 
     def test_invalid_edit_value_reprompts_and_discards_edits(self):
         original = incomplete_request()
@@ -115,9 +144,10 @@ class TestProcessResume:
         assert decision.problems == [
             "Still missing: mode, origin.locode, destination.locode, incoterm, cargo.0.dimensions"
         ]
-        # The valid edit is retained for the next round.
+        # The valid edit is retained for the next round, and reported applied.
         assert decision.output.cargo[0].weight is not None
         assert decision.output.cargo[0].weight.kg == 950
+        assert decision.edited_paths == ("cargo.0.weight",)
 
     def test_all_gaps_filled_confirms(self):
         resume = ConfirmationResume(
@@ -141,6 +171,7 @@ class TestProcessResume:
         assert isinstance(decision, Confirmed)
         assert decision.edited.missing_for_quoting() == []
         assert decision.edited.mode == "ocean_lcl"
+        assert set(decision.edited_paths) == set(resume.edits)
 
     def test_complete_request_approves_without_edits(self):
         complete = process_resume(

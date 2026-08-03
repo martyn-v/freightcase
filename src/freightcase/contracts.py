@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -83,17 +84,21 @@ class Rejected:
 class Reprompt:
     """Ask the human again. `problems` says why; `output` is the request the
     next round starts from (original if the edits were rejected wholesale,
-    edited if they were valid but left gaps)."""
+    edited if they were valid but left gaps). `edited_paths` are the edit
+    paths actually applied this round — empty when edits were rejected."""
 
     problems: list[str]
     output: QuoteRequest
+    edited_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class Confirmed:
-    """Approved and complete; `edited` is the final validated request."""
+    """Approved and complete; `edited` is the final validated request and
+    `edited_paths` the edit paths applied in the approving answer."""
 
     edited: QuoteRequest
+    edited_paths: tuple[str, ...] = ()
 
 
 ConfirmDecision = Rejected | Reprompt | Confirmed
@@ -124,10 +129,30 @@ def process_resume(output: QuoteRequest, resume: ConfirmationResume) -> ConfirmD
     missing = edited.missing_for_quoting()
     if missing:
         return Reprompt(
-            problems=[f"Still missing: {', '.join(missing)}"], output=edited
+            problems=[f"Still missing: {', '.join(missing)}"],
+            output=edited,
+            edited_paths=tuple(resume.edits),
         )
 
-    return Confirmed(edited=edited)
+    return Confirmed(edited=edited, edited_paths=tuple(resume.edits))
+
+
+def overlay_edited(
+    confidence: dict[str, FieldConfidence], edited_paths: Iterable[str]
+) -> dict[str, FieldConfidence]:
+    """Mark human-supplied paths in a provenance map. Entries at or beneath
+    each edited path are collapsed into one container-level "edited" entry —
+    leaf provenance describes the model's transcription, which no longer
+    applies to a value the human replaced. Returns a new dict."""
+    paths = tuple(edited_paths)
+    out: dict[str, FieldConfidence] = {
+        key: value
+        for key, value in confidence.items()
+        if not any(key == p or key.startswith(f"{p}.") for p in paths)
+    }
+    for p in paths:
+        out[p] = "edited"
+    return out
 
 
 def _location_label(location: Location) -> str:
