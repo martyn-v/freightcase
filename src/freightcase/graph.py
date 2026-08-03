@@ -1,6 +1,8 @@
 from __future__ import annotations
 from functools import partial
 
+from mcp import StdioServerParameters
+
 from freightcase.contracts import (
     TOOL_FOR_FUNCTION,
     Confirmed,
@@ -12,7 +14,12 @@ from freightcase.contracts import (
     process_resume,
 )
 from pydantic import ValidationError
-from freightcase.execution import StubToolExecutor, ToolExecutor, ToolExecutorError
+from freightcase.execution import (
+    MCPToolExecutor,
+    StubToolExecutor,
+    ToolExecutor,
+    ToolExecutorError,
+)
 from freightcase.extraction import (
     ExtractionError,
     extract_quote_request,
@@ -266,4 +273,10 @@ def build_graph(
     return builder.compile(checkpointer=checkpointer)
 
 
-graph = build_graph(executor=StubToolExecutor())
+graph = build_graph(
+    executor=MCPToolExecutor(
+        server_command=StdioServerParameters(
+            command="uv", args=["run", "python", "-m", "freightcase.tms_stub"]
+        )
+    )
+)

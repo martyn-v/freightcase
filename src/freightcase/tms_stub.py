@@ -9,6 +9,7 @@ the real MCPToolExecutor has a real server to talk to.
 from itertools import count
 
 from mcp.server.mcpserver import MCPServer
+from pydantic import BaseModel
 
 mcp = MCPServer("freightcase-stub-tms")
 
@@ -16,12 +17,17 @@ _quotes: dict[str, dict] = {}
 _references = count(1)
 
 
+class QuoteCreated(BaseModel):
+    reference: str
+    status: str
+
+
 @mcp.tool()
-def create_quote(quote: dict) -> dict:
+def create_quote(quote: dict) -> QuoteCreated:
     """Record a quote request and return its TMS reference."""
     reference = f"Q-{next(_references):04d}"
     _quotes[reference] = quote
-    return {"reference": reference, "status": "created"}
+    return QuoteCreated(reference=reference, status="created")
 
 
 if __name__ == "__main__":
