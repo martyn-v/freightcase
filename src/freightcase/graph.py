@@ -9,7 +9,12 @@ from freightcase.contracts import (
     SpecialistResult,
     process_resume,
 )
-from freightcase.extraction import ExtractionError, extract_quote_request
+from pydantic import ValidationError
+from freightcase.extraction import (
+    ExtractionError,
+    extract_quote_request,
+    summarize_validation_error,
+)
 from freightcase.intake import parse_eml
 import operator
 from typing import Annotated, NotRequired, TypedDict, Literal
@@ -97,8 +102,18 @@ def confirm(state: State) -> dict:
 
     while True:
         # Pause here. The resume value is untrusted human input: validate it
-        # like any other (rule 1) — garbage fails loudly, not silently.
-        resume = ConfirmationResume.model_validate(interrupt(payload.model_dump()))
+        # like any other (rule 1). Crucially, an invalid resume must RE-PROMPT,
+        # never raise: LangGraph caches the resume value in the checkpoint and
+        # replays it on retries, so an exception here would wedge the thread
+        # permanently — no later, corrected resume could ever get through.
+        raw = interrupt(payload.model_dump())
+        try:
+            resume = ConfirmationResume.model_validate(raw)
+        except ValidationError as e:
+            payload = payload.model_copy(
+                update={"problems": [f"Invalid response: {summarize_validation_error(e)}"]}
+            )
+            continue
 
         decision = process_resume(output, resume)
 

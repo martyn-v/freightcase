@@ -186,6 +186,56 @@ def test_confirm_reprompts_on_bad_edit_then_accepts_fix():
     assert weight.kg == 1200
 
 
+def test_malformed_resume_reprompts_instead_of_wedging_the_thread():
+    """A resume that fails ConfirmationResume validation (e.g. Studio sends
+    {'accepted': ...}) must re-prompt, never raise: LangGraph caches the bad
+    resume in the checkpoint and replays it on every retry, so raising here
+    permanently wedges the thread — no later correct resume can get through.
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+
+    extraction_json = json.dumps(
+        {
+            "mode": "road",
+            "origin": {"name": "Rotterdam"},
+            "destination": {"name": "Houston"},
+            "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
+            "cargo": [
+                {
+                    "description": "Crated lathe",
+                    "pieces": 1,
+                    "weight": {"value": 950, "unit": "kg"},
+                    "dimensions": {
+                        "length": 200,
+                        "width": 120,
+                        "height": 150,
+                        "unit": "cm",
+                    },
+                }
+            ],
+        }
+    )
+    fake = GenericFakeChatModel(messages=iter([extraction_json]))
+    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+
+    eml = FIXTURES / "quote_road_plain_es.eml"
+    paused = graph.invoke({"eml_file_path": str(eml)}, config=config)
+    assert "__interrupt__" in paused
+
+    # Malformed resume: wrong key. Must come back as a re-prompt, not an error.
+    reprompted = graph.invoke(Command(resume={"accepted": True}), config=config)
+    payload = reprompted["__interrupt__"][0].value
+    assert payload["problems"] != []
+    assert "approved" in payload["problems"][0]
+
+    # The thread is still alive: a correct resume completes the run.
+    done = graph.invoke(
+        Command(resume={"approved": True, "edits": {}}), config=config
+    )
+    assert "__interrupt__" not in done
+    assert done["results"][0].status == "executed"
+
+
 def test_confirm_remediates_gaps_across_rounds():
     """Approve-with-gaps re-prompts ('confirmed' implies complete), and valid
     edits stick between rounds: fixing one gap per resume must converge, not
