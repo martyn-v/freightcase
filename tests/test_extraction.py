@@ -4,7 +4,20 @@ from pathlib import Path
 import pytest
 from langchain_core.language_models import GenericFakeChatModel
 
-from freightcase.extraction import extract_quote_request, ExtractionError
+from freightcase.extraction import (
+    ExtractionError,
+    _repair_messages,
+    extract_quote_request,
+)
+
+MINIMAL_VALID_JSON = json.dumps(
+    {
+        "mode": "road",
+        "origin": {"name": "Bogota"},
+        "destination": {"name": "Medellin"},
+        "cargo": [{"description": "Packed foodstuffs"}],
+    }
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
@@ -100,7 +113,7 @@ CASES = {
 @pytest.mark.parametrize("name", CASES.keys(), ids=CASES.keys())
 def test_extraction(name: str):
     """Tests the extract_quote_request function against a set of email fixtures and expected outputs."""
-    result = extract_quote_request(load(name))
+    result = extract_quote_request(load(name)).request
 
     expected = CASES[name]
     if "mode" in expected:
@@ -139,7 +152,7 @@ def test_missing_weights_degrade_not_fail():
     email states no weight or dimensions; extraction succeeds with the gaps
     recorded so HITL can remedy them (rule 3: fatal is for malformed, not
     incomplete)."""
-    result = extract_quote_request(load("quote_missing_weights_en"))
+    result = extract_quote_request(load("quote_missing_weights_en")).request
 
     assert result.cargo[0].weight is None
     missing = result.missing_for_quoting()
@@ -170,6 +183,38 @@ def test_validation_error_message_names_the_failing_fields():
     fake = GenericFakeChatModel(messages=iter([bad]))
 
     with pytest.raises(ExtractionError) as exc_info:
-        extract_quote_request("irrelevant email body", model=fake)
+        extract_quote_request("irrelevant email body", model=fake, max_repairs=0)
 
     assert "cargo.0.weight.unit" in str(exc_info.value)
+
+
+def test_repair_loop_recovers_from_bad_first_attempt():
+    """First response is garbage; the repair round succeeds. The two-message
+    fake also proves exactly two invocations happen."""
+    fake = GenericFakeChatModel(messages=iter(["not json {{{", MINIMAL_VALID_JSON]))
+
+    outcome = extract_quote_request("irrelevant email body", model=fake)
+
+    assert outcome.request.mode == "road"
+    assert outcome.request.origin.name == "Bogota"
+    assert outcome.attempts == 2  # first try failed, repair succeeded
+    assert outcome.raw["mode"] == "road"  # the successful attempt's raw dict
+
+
+def test_repair_exhaustion_raises_last_error():
+    """Persistent garbage exhausts repairs and surfaces the final failure."""
+    fake = GenericFakeChatModel(messages=iter(["not json {{{", "still not json"]))
+
+    with pytest.raises(ExtractionError, match="valid JSON"):
+        extract_quote_request("irrelevant email body", model=fake, max_repairs=1)
+
+
+def test_repair_messages_put_failed_output_in_ai_turn():
+    """The rejected output goes in an AI message (the model's own turn), the
+    correction request in a human message naming the field errors."""
+    messages = _repair_messages('{"bad": 1}', "cargo.0.weight.unit: unrecognized")
+
+    ai, human = messages
+    assert ai.content == '{"bad": 1}'
+    assert "cargo.0.weight.unit" in human.content
+    assert "corrected" in human.content.lower()

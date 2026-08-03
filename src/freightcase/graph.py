@@ -46,9 +46,11 @@ def extract_quote(state: State, *, model: BaseChatModel | None = None) -> dict:
     if "intake" not in state or state["intake"] is None:
         raise ValueError("Intake result is missing. Please run intake first.")
 
-    # TODO: repair loop on ExtractionError (.raw / .validation_error) instead of failing the run
     try:
-        result = extract_quote_request(state["intake"].body_text, model=model)
+        result = extract_quote_request(
+            state["intake"].body_text, model=model, max_repairs=1
+        )
+
     except ExtractionError as e:
         return {
             "current": SpecialistResult(
@@ -56,12 +58,20 @@ def extract_quote(state: State, *, model: BaseChatModel | None = None) -> dict:
             )
         }
 
+    warnings = []
+    if result.attempts > 1:
+        warnings.append(
+            f"Model required {result.attempts} attempts to produce a valid quote request."
+        )
+
     return {
         "current": SpecialistResult(
             function="quote_request",
-            output=result,
+            output=result.request,
             status="extracted",
-            missing=result.missing_for_quoting(),
+            missing=result.request.missing_for_quoting(),
+            confidence=result.request.confidence(result.raw),
+            warnings=warnings,
         )
     }
 
@@ -111,7 +121,9 @@ def confirm(state: State) -> dict:
             resume = ConfirmationResume.model_validate(raw)
         except ValidationError as e:
             payload = payload.model_copy(
-                update={"problems": [f"Invalid response: {summarize_validation_error(e)}"]}
+                update={
+                    "problems": [f"Invalid response: {summarize_validation_error(e)}"]
+                }
             )
             continue
 

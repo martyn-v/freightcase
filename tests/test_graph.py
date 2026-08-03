@@ -99,7 +99,8 @@ def test_graph_handles_extraction_error():
 
     eml = FIXTURES / "quote_road_plain_es.eml"
 
-    fake = GenericFakeChatModel(messages=iter(["not json {{{"]))
+    # Two bad responses: the repair round must also fail for status=failed.
+    fake = GenericFakeChatModel(messages=iter(["not json {{{", "still not json"]))
     graph = build_graph(checkpointer=InMemorySaver(), model=fake)
 
     done = graph.invoke({"eml_file_path": str(eml)}, config=config)
@@ -234,6 +235,51 @@ def test_malformed_resume_reprompts_instead_of_wedging_the_thread():
     )
     assert "__interrupt__" not in done
     assert done["results"][0].status == "executed"
+
+
+def test_repair_warning_reaches_payload_and_final_result():
+    """A repaired extraction must announce itself: the warning shows in the
+    confirmation payload (human sees it before approving) and survives into
+    the finalized result (ops/audit sees it after).
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+
+    complete_json = json.dumps(
+        {
+            "mode": "road",
+            "origin": {"name": "Rotterdam"},
+            "destination": {"name": "Houston"},
+            "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
+            "cargo": [
+                {
+                    "description": "Crated lathe",
+                    "pieces": 1,
+                    "weight": {"value": 950, "unit": "kg"},
+                    "dimensions": {
+                        "length": 200,
+                        "width": 120,
+                        "height": 150,
+                        "unit": "cm",
+                    },
+                }
+            ],
+        }
+    )
+    # First attempt garbage, repair succeeds.
+    fake = GenericFakeChatModel(messages=iter(["not json {{{", complete_json]))
+    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+
+    eml = FIXTURES / "quote_road_plain_es.eml"
+    paused = graph.invoke({"eml_file_path": str(eml)}, config=config)
+
+    payload = paused["__interrupt__"][0].value
+    assert payload["warnings"] != []
+    assert "attempts" in payload["warnings"][0]
+
+    done = graph.invoke(
+        Command(resume={"approved": True, "edits": {}}), config=config
+    )
+    assert done["results"][0].warnings == payload["warnings"]
 
 
 def test_confirm_remediates_gaps_across_rounds():

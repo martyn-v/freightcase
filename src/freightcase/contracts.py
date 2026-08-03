@@ -15,6 +15,7 @@ class SpecialistResult(BaseModel):
     missing: list[str] = []
     confidence: dict[str, float] = {}
     status: Literal["extracted", "confirmed", "executed", "rejected", "failed"]
+    warnings: list[str] = []
     error: str | None = None
 
 
@@ -101,9 +102,7 @@ class Confirmed:
 ConfirmDecision = Rejected | Reprompt | Confirmed
 
 
-def process_resume(
-    output: QuoteRequest, resume: ConfirmationResume
-) -> ConfirmDecision:
+def process_resume(output: QuoteRequest, resume: ConfirmationResume) -> ConfirmDecision:
     """Decide what one human answer means for the confirmation loop.
 
     Pure function — no interrupt, no state — so every branch is unit-testable.
@@ -184,6 +183,7 @@ class ConfirmationPayload(BaseModel):
             summary=_summarize_quote_request(result.output),
             fields=result.output.model_dump(),
             missing=result.missing,
+            warnings=result.warnings,
         )
 
 

@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 from typing import Literal
 
+from freightcase.contracts import FieldConfidence
+
 WeightUnit = Literal["kg", "lb", "t", "g"]
 
 _TO_KG: dict[str, float] = {
@@ -238,4 +240,7 @@ class QuoteRequest(BaseModel):
                 missing.append(f"cargo.{i}.dimensions")
         return missing
 
+    def confidence(self, raw_model_output: dict = {}) -> dict[str, FieldConfidence]:
+        conf: dict[str, FieldConfidence] = {}
 
+        return conf
