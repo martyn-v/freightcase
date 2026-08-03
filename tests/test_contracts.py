@@ -113,7 +113,7 @@ class TestProcessResume:
 
         assert isinstance(decision, Reprompt)
         assert decision.problems == [
-            "Still missing: mode, incoterm, cargo.0.dimensions"
+            "Still missing: mode, origin.locode, destination.locode, incoterm, cargo.0.dimensions"
         ]
         # The valid edit is retained for the next round.
         assert decision.output.cargo[0].weight is not None
@@ -124,6 +124,8 @@ class TestProcessResume:
             approved=True,
             edits={
                 "mode": "ocean_lcl",
+                "origin.locode": "NLRTM",
+                "destination.locode": "USHOU",
                 "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
                 "cargo.0.weight": {"value": 950, "unit": "kg"},
                 "cargo.0.dimensions": {
@@ -147,6 +149,8 @@ class TestProcessResume:
                 approved=True,
                 edits={
                     "mode": "road",
+                    "origin.locode": "NLRTM",
+                    "destination.locode": "USHOU",
                     "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
                     "cargo.0.weight": {"value": 950, "unit": "kg"},
                     "cargo.0.dimensions": {
@@ -227,7 +231,12 @@ class TestConfirmationPayload:
 
         payload = ConfirmationPayload.from_result(result)
 
-        assert payload.missing == ["incoterm", "cargo.0.dimensions"]
+        assert payload.missing == [
+            "origin.locode",
+            "destination.locode",
+            "incoterm",
+            "cargo.0.dimensions",
+        ]
 
     def test_from_result_carries_confidence(self):
         quote_request = QuoteRequest(

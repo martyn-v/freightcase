@@ -17,8 +17,8 @@ def make_quote_request(**overrides: Any) -> QuoteRequest:
     """A complete, quotable request; tests override the field under test."""
     fields: dict[str, Any] = dict(
         mode="air",
-        origin=Location(name="Bogota", iata="BOG"),
-        destination=Location(name="Panama City", iata="PTY"),
+        origin=Location(name="Bogota", locode="COBOG", iata="BOG"),
+        destination=Location(name="Panama City", locode="PAPTY", iata="PTY"),
         incoterm=Incoterm(rule="DAP", named_place="Panama City"),
         cargo=[
             CargoLine(
@@ -199,6 +199,14 @@ class TestMissingForQuoting:
     def test_absent_mode_is_flagged(self):
         qr = make_quote_request(mode=None)
         assert qr.missing_for_quoting() == ["mode"]
+
+    def test_absent_locodes_are_flagged(self):
+        # The TMS write needs canonical locations; name alone can't execute.
+        qr = make_quote_request(
+            origin=Location(name="Bogota"),
+            destination=Location(name="Panama City"),
+        )
+        assert qr.missing_for_quoting() == ["origin.locode", "destination.locode"]
 
     def test_absent_pieces_and_weight_flagged_per_line(self):
         qr = make_quote_request(

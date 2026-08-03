@@ -36,7 +36,12 @@ def test_graph_pauses_for_confirmation_then_confirms():
     payload = pause.value
     assert payload["action"] == {"tool": "create_quote", "function": "quote_request"}
     assert "8400 kg" in payload["summary"]
-    assert payload["missing"] == ["cargo.0.dimensions"]
+    # The email states city names but no LOCODEs; road mode requires dims.
+    assert payload["missing"] == [
+        "origin.locode",
+        "destination.locode",
+        "cargo.0.dimensions",
+    ]
 
     # Phase 2: human approves, filling the dimensions gap ('confirmed'
     # implies complete: approving with gaps would bounce back).
@@ -45,6 +50,8 @@ def test_graph_pauses_for_confirmation_then_confirms():
             resume={
                 "approved": True,
                 "edits": {
+                    "origin.locode": "COBOG",
+                    "destination.locode": "COMDE",
                     "cargo.0.dimensions": {
                         "length": 120,
                         "width": 100,
@@ -124,8 +131,8 @@ def test_confirm_reprompts_on_bad_edit_then_accepts_fix():
     extraction_json = json.dumps(
         {
             "mode": "road",
-            "origin": {"name": "Rotterdam"},
-            "destination": {"name": "Houston"},
+            "origin": {"name": "Rotterdam", "locode": "NLRTM"},
+            "destination": {"name": "Houston", "locode": "USHOU"},
             "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
             "cargo": [
                 {
@@ -198,8 +205,8 @@ def test_malformed_resume_reprompts_instead_of_wedging_the_thread():
     extraction_json = json.dumps(
         {
             "mode": "road",
-            "origin": {"name": "Rotterdam"},
-            "destination": {"name": "Houston"},
+            "origin": {"name": "Rotterdam", "locode": "NLRTM"},
+            "destination": {"name": "Houston", "locode": "USHOU"},
             "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
             "cargo": [
                 {
@@ -247,8 +254,8 @@ def test_repair_warning_reaches_payload_and_final_result():
     complete_json = json.dumps(
         {
             "mode": "road",
-            "origin": {"name": "Rotterdam"},
-            "destination": {"name": "Houston"},
+            "origin": {"name": "Rotterdam", "locode": "NLRTM"},
+            "destination": {"name": "Houston", "locode": "USHOU"},
             "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
             "cargo": [
                 {
@@ -296,8 +303,8 @@ def test_confirm_remediates_gaps_across_rounds():
     extraction_json = json.dumps(
         {
             "mode": "road",
-            "origin": {"name": "Rotterdam"},
-            "destination": {"name": "Houston"},
+            "origin": {"name": "Rotterdam", "locode": "NLRTM"},
+            "destination": {"name": "Houston", "locode": "USHOU"},
             "cargo": [
                 {
                     "description": "Crated lathe",

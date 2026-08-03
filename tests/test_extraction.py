@@ -87,7 +87,7 @@ CASES = {
         "destination_iata": "MEX",
         "cargo_0_pieces": 10,
         "cargo_0_kg": pytest.approx(250.0),
-        "missing_for_quoting": ["incoterm"],
+        "missing_for_quoting": ["origin.locode", "destination.locode", "incoterm"],
     },
     "quote_imperial_units": {
         "origin_locode": None,

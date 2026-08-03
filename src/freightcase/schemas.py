@@ -230,6 +230,13 @@ class QuoteRequest(BaseModel):
         missing: list[str] = []
         if self.mode is None:
             missing.append("mode")
+        # The TMS write needs canonical locations; a name alone can't execute.
+        # LOCODE resolution is downstream of extraction — usually the human's
+        # (or a future resolver's) job at the confirmation gate.
+        if self.origin.locode is None:
+            missing.append("origin.locode")
+        if self.destination.locode is None:
+            missing.append("destination.locode")
         if self.incoterm is None:
             missing.append("incoterm")
         for i, line in enumerate(self.cargo):
