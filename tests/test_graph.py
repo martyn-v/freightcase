@@ -38,8 +38,24 @@ def test_graph_pauses_for_confirmation_then_confirms():
     assert "8400 kg" in payload["summary"]
     assert payload["missing"] == ["cargo.0.dimensions"]
 
-    # Phase 2: human approves; the run finishes.
-    done = graph.invoke(Command(resume={"approved": True, "edits": {}}), config=config)
+    # Phase 2: human approves, filling the dimensions gap ('confirmed'
+    # implies complete: approving with gaps would bounce back).
+    done = graph.invoke(
+        Command(
+            resume={
+                "approved": True,
+                "edits": {
+                    "cargo.0.dimensions": {
+                        "length": 120,
+                        "width": 100,
+                        "height": 180,
+                        "unit": "cm",
+                    }
+                },
+            }
+        ),
+        config=config,
+    )
 
     intake = done["intake"]
     assert intake is not None
@@ -48,8 +64,7 @@ def test_graph_pauses_for_confirmation_then_confirms():
     current = done["results"][0]
     assert current.function == "quote_request"
     assert current.status == "executed"
-    # Email states an incoterm but no dimensions: road mode requires dims.
-    assert current.missing == ["cargo.0.dimensions"]
+    assert current.missing == []
 
     extraction = current.output
     assert extraction is not None
@@ -169,3 +184,81 @@ def test_confirm_reprompts_on_bad_edit_then_accepts_fix():
     weight = result.output.cargo[0].weight
     assert weight is not None
     assert weight.kg == 1200
+
+
+def test_confirm_remediates_gaps_across_rounds():
+    """Approve-with-gaps re-prompts ('confirmed' implies complete), and valid
+    edits stick between rounds: fixing one gap per resume must converge, not
+    demand the human re-send everything each time.
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": str(uuid4())}}
+
+    # Two gaps: weight and incoterm.
+    extraction_json = json.dumps(
+        {
+            "mode": "road",
+            "origin": {"name": "Rotterdam"},
+            "destination": {"name": "Houston"},
+            "cargo": [
+                {
+                    "description": "Crated lathe",
+                    "pieces": 1,
+                    "dimensions": {
+                        "length": 200,
+                        "width": 120,
+                        "height": 150,
+                        "unit": "cm",
+                    },
+                }
+            ],
+        }
+    )
+    fake = GenericFakeChatModel(messages=iter([extraction_json]))
+    graph = build_graph(checkpointer=InMemorySaver(), model=fake)
+
+    eml = FIXTURES / "quote_road_plain_es.eml"
+    paused = graph.invoke({"eml_file_path": str(eml)}, config=config)
+    assert paused["__interrupt__"][0].value["missing"] == [
+        "incoterm",
+        "cargo.0.weight",
+    ]
+
+    # Round 1: fix only the weight. Approval must bounce - incoterm still open.
+    reprompted = graph.invoke(
+        Command(
+            resume={
+                "approved": True,
+                "edits": {"cargo.0.weight": {"value": 950, "unit": "kg"}},
+            }
+        ),
+        config=config,
+    )
+
+    payload = reprompted["__interrupt__"][0].value
+    assert payload["problems"] == ["Still missing: incoterm"]
+    assert payload["missing"] == ["incoterm"]
+    # The weight fix is visible in the re-prompt: fields and summary updated.
+    assert payload["fields"]["cargo"][0]["weight"]["kg"] == 950
+    assert "950 kg" in payload["summary"]
+
+    # Round 2: fix only the incoterm - the weight edit must have stuck.
+    done = graph.invoke(
+        Command(
+            resume={
+                "approved": True,
+                "edits": {"incoterm": {"rule": "EXW", "named_place": "Rotterdam"}},
+            }
+        ),
+        config=config,
+    )
+
+    assert "__interrupt__" not in done
+    result = done["results"][0]
+    assert result.status == "executed"
+    assert result.missing == []
+    assert result.output is not None
+    assert result.output.incoterm is not None
+    assert result.output.incoterm.rule == "EXW"
+    weight = result.output.cargo[0].weight
+    assert weight is not None
+    assert weight.kg == 950

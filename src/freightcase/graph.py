@@ -1,19 +1,15 @@
 from __future__ import annotations
 from functools import partial
 
-from pydantic import ValidationError
 from freightcase.contracts import (
+    Confirmed,
     ConfirmationPayload,
     ConfirmationResume,
-    EditError,
+    Rejected,
     SpecialistResult,
-    apply_edits,
+    process_resume,
 )
-from freightcase.extraction import (
-    ExtractionError,
-    extract_quote_request,
-    summarize_validation_error,
-)
+from freightcase.extraction import ExtractionError, extract_quote_request
 from freightcase.intake import parse_eml
 import operator
 from typing import Annotated, NotRequired, TypedDict, Literal
@@ -22,7 +18,6 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import Command, interrupt
 from langgraph.graph import END, START, StateGraph
 from freightcase.intake import IntakeResult
-from freightcase.schemas import QuoteRequest
 
 
 class State(TypedDict):
@@ -74,38 +69,66 @@ def route_after_extract(state: State) -> Literal["confirm", "__end__"]:
 
 
 def confirm(state: State) -> dict:
-    current = require_current(state)
+    """The HITL gate: pause with a ConfirmationPayload, loop until the human
+    either rejects or approves a *complete* request (possibly after edits).
 
+    Thin wrapper per the repo rule: all decision logic lives in the pure
+    `process_resume` (contracts.py); this function only owns the interrupt
+    mechanics, which have two non-obvious properties:
+
+    - Replay on resume: every resume re-runs this function from the top.
+      Earlier `interrupt()` calls return their cached answers instantly and
+      the newest call pauses again — so everything before the loop must stay
+      cheap and side-effect-free, and the loop naturally steps one human
+      answer per resume.
+    - The loop is bounded by the human, not a counter: Rejected and Confirmed
+      are the only exits, and reject is always available whatever state the
+      edits are in.
+    """
+    current = require_current(state)
+    output = current.output
+    if output is None:
+        # Routing guarantees failed results never reach confirm; this guard
+        # keeps the invariant loud if the wiring ever changes.
+        raise ValueError("Cannot confirm a result with no extraction output.")
+
+    # First prompt: no problems, payload reflects the extraction as-is.
     payload = ConfirmationPayload.from_result(current)
-    output: QuoteRequest = current.output  # type: ignore (we know it's not None because from_result would have raised otherwise)
 
     while True:
+        # Pause here. The resume value is untrusted human input: validate it
+        # like any other (rule 1) — garbage fails loudly, not silently.
         resume = ConfirmationResume.model_validate(interrupt(payload.model_dump()))
-        if not resume.approved:
+
+        decision = process_resume(output, resume)
+
+        if isinstance(decision, Rejected):
             return {"current": current.model_copy(update={"status": "rejected"})}
 
-        try:
-            edited = apply_edits(output, resume.edits)
-        except EditError as e:
-            payload = payload.model_copy(update={"problems": [str(e)]})
-            continue
-        except ValidationError as e:
-            payload = payload.model_copy(
-                update={"problems": [summarize_validation_error(e)]}
-            )
-            continue
+        if isinstance(decision, Confirmed):
+            # `confirmed` implies complete (process_resume enforces it), so
+            # missing is [] by construction and execute needs no re-check.
+            return {
+                "current": current.model_copy(
+                    update={
+                        "status": "confirmed",
+                        "output": decision.edited,
+                        "missing": [],
+                    }
+                )
+            }
 
-        # TODO: check if edited has missing fields for quoting; if so, return to the user for further edits instead of confirming
-
-        return {
-            "current": current.model_copy(
-                update={
-                    "status": "confirmed",
-                    "output": edited,
-                    "missing": edited.missing_for_quoting(),
-                }
+        # Reprompt: carry forward whatever process_resume decided survives
+        # (original output if the edits were bad, edited output if they were
+        # valid but incomplete), and rebuild the payload from it so the human
+        # sees their accepted progress — fields, summary and missing update;
+        # problems says why they're being asked again.
+        output = decision.output
+        payload = ConfirmationPayload.from_result(
+            current.model_copy(
+                update={"output": output, "missing": output.missing_for_quoting()}
             )
-        }
+        ).model_copy(update={"problems": decision.problems})
 
 
 def route_after_confirm(state: State) -> Literal["execute", "__end__"]:

@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
+from freightcase.extraction import summarize_validation_error
 from freightcase.schemas import Location, QuoteRequest
 
 
@@ -70,6 +74,64 @@ def apply_edits(original: QuoteRequest, edits: dict[str, Any]) -> QuoteRequest:
     for path, value in edits.items():
         _set_path(data, path, value)
     return QuoteRequest.model_validate(data)
+
+
+@dataclass(frozen=True)
+class Rejected:
+    """The human declined; the run records the extraction as rejected."""
+
+
+@dataclass(frozen=True)
+class Reprompt:
+    """Ask the human again. `problems` says why; `output` is the request the
+    next round starts from (original if the edits were rejected wholesale,
+    edited if they were valid but left gaps)."""
+
+    problems: list[str]
+    output: QuoteRequest
+
+
+@dataclass(frozen=True)
+class Confirmed:
+    """Approved and complete; `edited` is the final validated request."""
+
+    edited: QuoteRequest
+
+
+ConfirmDecision = Rejected | Reprompt | Confirmed
+
+
+def process_resume(
+    output: QuoteRequest, resume: ConfirmationResume
+) -> ConfirmDecision:
+    """Decide what one human answer means for the confirmation loop.
+
+    Pure function — no interrupt, no state — so every branch is unit-testable.
+    Invariants it enforces:
+    - Rejection always exits, whatever the edits contain.
+    - Edits are all-or-nothing per answer: a bad path or bad value discards
+      the whole batch (the human retries from what they saw, no partial state).
+    - Valid-but-incomplete answers keep the applied edits (`output` in the
+      Reprompt) so multi-round remediation converges.
+    - Confirmed implies complete: missing_for_quoting() must be empty.
+    """
+    if not resume.approved:
+        return Rejected()
+
+    try:
+        edited = apply_edits(output, resume.edits)
+    except EditError as e:
+        return Reprompt(problems=[str(e)], output=output)
+    except ValidationError as e:
+        return Reprompt(problems=[summarize_validation_error(e)], output=output)
+
+    missing = edited.missing_for_quoting()
+    if missing:
+        return Reprompt(
+            problems=[f"Still missing: {', '.join(missing)}"], output=edited
+        )
+
+    return Confirmed(edited=edited)
 
 
 def _location_label(location: Location) -> str:

@@ -2,10 +2,15 @@ import pytest
 from pydantic import ValidationError
 
 from freightcase.contracts import (
+    Confirmed,
     ConfirmationPayload,
+    ConfirmationResume,
     EditError,
+    Rejected,
+    Reprompt,
     SpecialistResult,
     apply_edits,
+    process_resume,
 )
 from freightcase.schemas import (
     CargoLine,
@@ -67,6 +72,98 @@ class TestApplyEdits:
         original = incomplete_request()
         apply_edits(original, {"mode": "air"})
         assert original.mode is None
+
+
+class TestProcessResume:
+    """The confirm node's pure per-resume decision logic, tested without any
+    graph machinery. The node itself is a thin interrupt loop over this."""
+
+    def test_rejection_wins_even_with_edits_attached(self):
+        resume = ConfirmationResume(approved=False, edits={"mode": "air"})
+        decision = process_resume(incomplete_request(), resume)
+        assert isinstance(decision, Rejected)
+
+    def test_unknown_edit_path_reprompts_and_discards_edits(self):
+        original = incomplete_request()
+        resume = ConfirmationResume(approved=True, edits={"incotrem": {}})
+        decision = process_resume(original, resume)
+
+        assert isinstance(decision, Reprompt)
+        assert "incotrem" in decision.problems[0]
+        assert decision.output is original  # rejected wholesale, nothing sticks
+
+    def test_invalid_edit_value_reprompts_and_discards_edits(self):
+        original = incomplete_request()
+        resume = ConfirmationResume(
+            approved=True,
+            edits={"cargo.0.weight": {"value": 10, "unit": "quintales"}},
+        )
+        decision = process_resume(original, resume)
+
+        assert isinstance(decision, Reprompt)
+        assert "quintales" in decision.problems[0]
+        assert decision.output is original
+
+    def test_valid_edit_with_remaining_gaps_reprompts_but_sticks(self):
+        resume = ConfirmationResume(
+            approved=True,
+            edits={"cargo.0.weight": {"value": 950, "unit": "kg"}},
+        )
+        decision = process_resume(incomplete_request(), resume)
+
+        assert isinstance(decision, Reprompt)
+        assert decision.problems == [
+            "Still missing: mode, incoterm, cargo.0.dimensions"
+        ]
+        # The valid edit is retained for the next round.
+        assert decision.output.cargo[0].weight is not None
+        assert decision.output.cargo[0].weight.kg == 950
+
+    def test_all_gaps_filled_confirms(self):
+        resume = ConfirmationResume(
+            approved=True,
+            edits={
+                "mode": "ocean_lcl",
+                "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
+                "cargo.0.weight": {"value": 950, "unit": "kg"},
+                "cargo.0.dimensions": {
+                    "length": 200,
+                    "width": 120,
+                    "height": 150,
+                    "unit": "cm",
+                },
+            },
+        )
+        decision = process_resume(incomplete_request(), resume)
+
+        assert isinstance(decision, Confirmed)
+        assert decision.edited.missing_for_quoting() == []
+        assert decision.edited.mode == "ocean_lcl"
+
+    def test_complete_request_approves_without_edits(self):
+        complete = process_resume(
+            incomplete_request(),
+            ConfirmationResume(
+                approved=True,
+                edits={
+                    "mode": "road",
+                    "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
+                    "cargo.0.weight": {"value": 950, "unit": "kg"},
+                    "cargo.0.dimensions": {
+                        "length": 200,
+                        "width": 120,
+                        "height": 150,
+                        "unit": "cm",
+                    },
+                },
+            ),
+        )
+        assert isinstance(complete, Confirmed)
+
+        decision = process_resume(
+            complete.edited, ConfirmationResume(approved=True, edits={})
+        )
+        assert isinstance(decision, Confirmed)
 
 
 class TestConfirmationPayload:
