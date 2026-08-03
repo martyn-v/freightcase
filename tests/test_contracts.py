@@ -229,6 +229,32 @@ class TestConfirmationPayload:
 
         assert payload.missing == ["incoterm", "cargo.0.dimensions"]
 
+    def test_from_result_carries_confidence(self):
+        quote_request = QuoteRequest(
+            mode="road",
+            origin=Location(name="Bogota"),
+            destination=Location(name="Medellin"),
+            incoterm=Incoterm(rule="DAP", named_place="Medellin"),
+            cargo=[
+                CargoLine(
+                    description="Packed foodstuffs",
+                    pieces=12,
+                    weight=Weight(value=8400, unit="kg"),
+                    dimensions=Dimensions(length=120, width=80, height=60, unit="cm"),
+                )
+            ],
+        )
+        result = SpecialistResult(
+            function="quote_request",
+            output=quote_request,
+            status="extracted",
+            confidence={"mode": "stated", "cargo.0.weight": "normalized"},
+        )
+
+        payload = ConfirmationPayload.from_result(result)
+
+        assert payload.confidence == result.confidence
+
     def test_from_result_carries_warnings(self):
         quote_request = QuoteRequest(
             mode="road",

@@ -275,6 +275,9 @@ def test_repair_warning_reaches_payload_and_final_result():
     payload = paused["__interrupt__"][0].value
     assert payload["warnings"] != []
     assert "attempts" in payload["warnings"][0]
+    # Confidence is derived at extraction and reaches the human untouched.
+    assert payload["confidence"]["mode"] == "stated"
+    assert payload["confidence"]["cargo.0.weight.unit"] == "stated"
 
     done = graph.invoke(
         Command(resume={"approved": True, "edits": {}}), config=config

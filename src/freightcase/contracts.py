@@ -6,20 +6,17 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from freightcase.extraction import summarize_validation_error
-from freightcase.schemas import Location, QuoteRequest
+from freightcase.schemas import FieldConfidence, Location, QuoteRequest
 
 
 class SpecialistResult(BaseModel):
     function: Literal["quote_request"]
     output: QuoteRequest | None
     missing: list[str] = []
-    confidence: dict[str, float] = {}
+    confidence: dict[str, FieldConfidence] = {}
     status: Literal["extracted", "confirmed", "executed", "rejected", "failed"]
     warnings: list[str] = []
     error: str | None = None
-
-
-FieldConfidence = Literal["stated", "normalized", "missing"]
 
 
 class ConfirmationAction(BaseModel):
@@ -183,6 +180,7 @@ class ConfirmationPayload(BaseModel):
             summary=_summarize_quote_request(result.output),
             fields=result.output.model_dump(),
             missing=result.missing,
+            confidence=result.confidence,
             warnings=result.warnings,
         )
 
