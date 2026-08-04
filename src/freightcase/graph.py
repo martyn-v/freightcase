@@ -3,6 +3,11 @@ from functools import partial
 
 from mcp import StdioServerParameters
 
+from freightcase.classification import (
+    ClassificationError,
+    classify_email,
+    ClassificationOutcome,
+)
 from freightcase.contracts import (
     TOOL_FOR_FUNCTION,
     Confirmed,
@@ -16,15 +21,11 @@ from freightcase.contracts import (
 from pydantic import ValidationError
 from freightcase.execution import (
     MCPToolExecutor,
-    StubToolExecutor,
     ToolExecutor,
     ToolExecutorError,
 )
-from freightcase.extraction import (
-    ExtractionError,
-    extract_quote_request,
-    summarize_validation_error,
-)
+from freightcase.extraction import ExtractionError, extract_quote_request
+from freightcase.validation import summarize_validation_error
 from freightcase.intake import parse_eml
 import operator
 from typing import Annotated, NotRequired, TypedDict, Literal
@@ -40,6 +41,7 @@ class State(TypedDict):
     intake: NotRequired[IntakeResult]  # The result of parsing the .eml file
     current: NotRequired[SpecialistResult | None]  # The current specialist result
     results: NotRequired[Annotated[list[SpecialistResult], operator.add]]
+    classification: NotRequired[ClassificationOutcome]
 
 
 def require_current(state: State) -> SpecialistResult:
@@ -198,6 +200,9 @@ def execute(state: State, *, executor: ToolExecutor) -> dict:
         # without output. Loud failure means the wiring broke, not the email.
         raise ValueError("Confirmed result has no output; graph wiring is broken.")
 
+    if current.function is None:
+        raise ValueError("No confirmable action for an unrouted email")
+
     try:
         # TOOL_FOR_FUNCTION is the same mapping from_result used to build the
         # displayed action: what the human approved is what runs.
@@ -236,8 +241,36 @@ def intake(state: State) -> dict:
     }
 
 
-def classify(state: State) -> Command[Literal["quote_specialist"]]:
-    return Command(goto="quote_specialist")
+def classify(
+    state: State, *, model=None
+) -> Command[Literal["finalize", "quote_specialist"]]:
+    if "intake" not in state or state["intake"] is None:
+        raise ValueError("Intake result is missing. Please run intake first.")
+    intake = state["intake"]
+
+    try:
+        outcome = classify_email(
+            intake.body_text, intake.subject or "No subject extracted", model=model
+        )
+    except ClassificationError as e:
+        outcome = ClassificationOutcome(
+            classification="unknown", reason=f"Classifier failed: {e}"
+        )
+
+    if outcome.classification == "unknown":
+        return Command(
+            update={
+                "classification": outcome,
+                "current": SpecialistResult(
+                    function=None,
+                    output=None,
+                    status="failed",
+                    error=f"No specialist for this email: {outcome.reason}",
+                ),
+            },
+            goto="finalize",  # straight to the dead-letter queue
+        )
+    return Command(update={"classification": outcome}, goto="quote_specialist")
 
 
 def build_graph(
@@ -261,7 +294,14 @@ def build_graph(
 
     builder = StateGraph(State)
     builder.add_node("intake", intake)
-    builder.add_node("classify", classify)
+    # partial() hides classify's Command[Literal[...]] return annotation from
+    # LangGraph's destination inference; declare the edges explicitly so the
+    # rendered graph stays truthful.
+    builder.add_node(
+        "classify",
+        partial(classify, model=model),
+        destinations=("quote_specialist", "finalize"),
+    )
     builder.add_node("quote_specialist", quote_specialist)
     builder.add_node("finalize", finalize)
 

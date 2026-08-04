@@ -48,11 +48,16 @@ def extraction_json(*, exclude: tuple[str, ...] = ()) -> str:
     return json.dumps(data)
 
 
-def fake_graph(*model_responses: str):
+def fake_graph(
+    *model_responses: str,
+    classification: str = '{"classification": "quote_request"}',
+):
     """A graph with a scripted model and its own stub executor: fully
-    deterministic, no LLM, no shared state between tests."""
+    deterministic, no LLM, no shared state between tests. The classify node
+    consumes the model's first response, so a classification is prepended;
+    override it to script the unknown/dead-letter route."""
     executor = StubToolExecutor()
-    model = GenericFakeChatModel(messages=iter(model_responses))
+    model = GenericFakeChatModel(messages=iter([classification, *model_responses]))
     graph = build_graph(
         executor=executor, checkpointer=InMemorySaver(), model=model
     )
@@ -347,6 +352,62 @@ def test_confirm_remediates_gaps_across_rounds():
     assert result.confidence["cargo.0.weight"] == "edited"
     assert result.confidence["incoterm"] == "edited"
     assert result.confidence["mode"] == "stated"
+
+
+def test_spam_email_journey_dead_letters_via_live_classifier(live_graph):
+    """The real classifier on a real spam .eml: marketing mail must route to
+    the dead-letter queue without extraction, pause, or TMS write. Distinct
+    fixture failure mode: an email that should never resolve to any function."""
+    graph, executor = live_graph
+
+    done = graph.invoke(
+        {"eml_file_path": str(FIXTURES / "spam_marketing_en.eml")}, config=config()
+    )
+
+    assert "__interrupt__" not in done
+    result = done["results"][0]
+    assert result.function is None
+    assert result.status == "failed"
+    assert executor.calls == []
+    assert done["classification"].classification == "unknown"
+
+
+def test_unclassifiable_email_journey_dead_letters_without_pausing():
+    """Intake -> classify says 'unknown' -> straight to finalize: a recorded
+    failed outcome carrying the classifier's reason. No extraction, no
+    interrupt (nothing to confirm), no TMS write; the classifier's verdict
+    is kept in state for audit."""
+    graph, executor = fake_graph(
+        classification='{"classification": "unknown", "reason": "marketing newsletter"}',
+    )
+
+    done = graph.invoke({"eml_file_path": ROAD_EML}, config=config())
+
+    assert "__interrupt__" not in done
+    result = done["results"][0]
+    assert result.function is None  # no specialist was assigned
+    assert result.status == "failed"
+    assert result.error is not None
+    assert "marketing newsletter" in result.error
+    assert executor.calls == []  # never touched the TMS
+    # The classifier's verdict is auditable in state.
+    assert done["classification"].classification == "unknown"
+
+
+def test_garbage_classifier_output_degrades_to_unknown_not_crash():
+    """A classifier that emits garbage must not kill the run: the email
+    dead-letters as unknown with the classifier failure as the reason."""
+    graph, executor = fake_graph(classification="not json {{{")
+
+    done = graph.invoke({"eml_file_path": ROAD_EML}, config=config())
+
+    assert "__interrupt__" not in done
+    result = done["results"][0]
+    assert result.function is None
+    assert result.status == "failed"
+    assert result.error is not None
+    assert "Classifier failed" in result.error
+    assert executor.calls == []
 
 
 # --- Node tests: direct calls, no graph machinery. ---

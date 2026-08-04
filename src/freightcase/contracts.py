@@ -6,12 +6,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
-from freightcase.extraction import summarize_validation_error
+from freightcase.validation import summarize_validation_error
 from freightcase.schemas import FieldConfidence, Location, QuoteRequest
 
 
 class SpecialistResult(BaseModel):
-    function: Literal["quote_request"]
+    function: Literal["quote_request"] | None
     output: QuoteRequest | None
     missing: list[str] = []
     confidence: dict[str, FieldConfidence] = {}
@@ -209,6 +209,11 @@ class ConfirmationPayload(BaseModel):
             raise ValueError(
                 "Cannot build a confirmation payload without extraction output "
                 f"(status={result.status!r}); failed results have nothing to confirm."
+            )
+        if result.function is None:
+            raise ValueError(
+                "Cannot build a confirmation payload for an unrouted email: "
+                "no function means no confirmable action."
             )
         return ConfirmationPayload(
             action=ConfirmationAction(
