@@ -1,39 +1,48 @@
 from __future__ import annotations
-from functools import partial
 
+import operator
+from functools import partial
+from typing import Annotated, Literal, NotRequired, TypedDict
+
+from langchain_core.language_models import BaseChatModel
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command, interrupt
 from mcp import StdioServerParameters
+from pydantic import ValidationError
 
 from freightcase.classification import (
     ClassificationError,
-    classify_email,
     ClassificationOutcome,
+    classify_email,
 )
 from freightcase.contracts import (
     TOOL_FOR_FUNCTION,
-    Confirmed,
     ConfirmationPayload,
     ConfirmationResume,
+    Confirmed,
     Rejected,
     SpecialistResult,
     overlay_edited,
     process_resume,
 )
-from pydantic import ValidationError
 from freightcase.execution import (
     MCPToolExecutor,
     ToolExecutor,
     ToolExecutorError,
 )
 from freightcase.extraction import ExtractionError, extract_quote_request
+from freightcase.intake import EmailAddress, EmailAttachment, IntakeResult, parse_eml
+from freightcase.schemas import (
+    CargoLine,
+    Dimensions,
+    Incoterm,
+    Location,
+    QuoteRequest,
+    Weight,
+)
 from freightcase.validation import summarize_validation_error
-from freightcase.intake import parse_eml
-import operator
-from typing import Annotated, NotRequired, TypedDict, Literal
-from langchain_core.language_models import BaseChatModel
-from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.types import Command, interrupt
-from langgraph.graph import END, START, StateGraph
-from freightcase.intake import IntakeResult
 
 
 class State(TypedDict):
@@ -271,6 +280,32 @@ def classify(
             goto="finalize",  # straight to the dead-letter queue
         )
     return Command(update={"classification": outcome}, goto="quote_specialist")
+
+
+# Our pydantic models that legitimately live inside checkpoints — the
+# allowlist is exact (module, class) pairs, so every nested model must be
+# listed; a type left out silently deserializes as a plain dict. LangGraph
+# warns on (and will eventually block) unregistered types; anyone
+# constructing a checkpointer for this graph should pass
+# `serde=checkpoint_serde()` so strict mode stays green.
+CHECKPOINT_ALLOWED_TYPES: list[type] = [
+    ClassificationOutcome,
+    EmailAddress,
+    EmailAttachment,
+    IntakeResult,
+    SpecialistResult,
+    # Everything reachable from SpecialistResult.output:
+    QuoteRequest,
+    CargoLine,
+    Weight,
+    Dimensions,
+    Location,
+    Incoterm,
+]
+
+
+def checkpoint_serde() -> JsonPlusSerializer:
+    return JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_ALLOWED_TYPES)
 
 
 def build_graph(

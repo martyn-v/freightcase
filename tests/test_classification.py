@@ -1,9 +1,7 @@
-from freightcase.classification import classify_email
 import pytest
-from freightcase.classification import ClassificationError
-
 from langchain_core.language_models import GenericFakeChatModel
 
+from freightcase.classification import ClassificationError, classify_email
 
 CASES = {
     "quote": {

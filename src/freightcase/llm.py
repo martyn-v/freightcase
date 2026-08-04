@@ -1,7 +1,8 @@
-from dotenv import load_dotenv
 import os
-from langchain_ollama import ChatOllama
+
+from dotenv import load_dotenv
 from langchain_core.language_models import BaseChatModel
+from langchain_ollama import ChatOllama
 
 load_dotenv()
 

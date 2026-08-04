@@ -1,9 +1,10 @@
 import email
 from email import policy
-import pytest
 from pathlib import Path
-from freightcase.intake import IntakeError
-from freightcase.intake import parse_eml
+
+import pytest
+
+from freightcase.intake import IntakeError, parse_eml
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
 

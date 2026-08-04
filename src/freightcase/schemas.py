@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 from typing import Literal
+
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 # Per-field provenance: what the human can trust about each extracted value.
 # Deterministic, not model-emitted (rule 1): "normalized" means a validator
@@ -231,9 +232,10 @@ class QuoteRequest(BaseModel):
         missing: list[str] = []
         if self.mode is None:
             missing.append("mode")
-        # The TMS write needs canonical locations; a name alone can't execute.
-        # LOCODE resolution is downstream of extraction — usually the human's
-        # (or a future resolver's) job at the confirmation gate.
+        # The TMS write needs a LOCODE specifically; a name alone can't
+        # execute, and a stated IATA code is informative context for whoever
+        # supplies the LOCODE at the gate (or a future auto-resolver), never
+        # a substitute. Resolution is downstream of extraction by design.
         if self.origin.locode is None:
             missing.append("origin.locode")
         if self.destination.locode is None:
@@ -280,7 +282,10 @@ def _walk_confidence(
             conf[path] = "missing"
         elif isinstance(value, BaseModel):
             _walk_confidence(
-                value, raw_value if isinstance(raw_value, dict) else {}, f"{path}.", conf
+                value,
+                raw_value if isinstance(raw_value, dict) else {},
+                f"{path}.",
+                conf,
             )
         elif isinstance(value, list):
             for i, item in enumerate(value):

@@ -6,8 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
-from freightcase.validation import summarize_validation_error
 from freightcase.schemas import FieldConfidence, Location, QuoteRequest
+from freightcase.validation import summarize_validation_error
 
 
 class SpecialistResult(BaseModel):
@@ -204,7 +204,7 @@ class ConfirmationPayload(BaseModel):
     problems: list[str] = []
 
     @staticmethod
-    def from_result(result: SpecialistResult) -> "ConfirmationPayload":
+    def from_result(result: SpecialistResult) -> ConfirmationPayload:
         if result.output is None:
             raise ValueError(
                 "Cannot build a confirmation payload without extraction output "

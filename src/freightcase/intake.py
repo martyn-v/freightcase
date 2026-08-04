@@ -1,11 +1,11 @@
-from email import policy
 import email
+from datetime import datetime
+from email import policy
 from email.message import EmailMessage
 from email.utils import parsedate_to_datetime
-from pydantic import BaseModel
 
-from datetime import datetime
 from bs4 import BeautifulSoup
+from pydantic import BaseModel
 
 
 class IntakeError(Exception):
@@ -60,7 +60,7 @@ def _parse_date(msg: EmailMessage, warnings: list[str]) -> datetime | None:
         return None
     try:
         return parsedate_to_datetime(date)
-    except Exception:
+    except (ValueError, TypeError):
         warnings.append("Invalid Date header")
         return None
 

@@ -10,7 +10,7 @@ from langgraph.types import Command
 
 from freightcase.contracts import SpecialistResult
 from freightcase.execution import StubToolExecutor, ToolExecutorError
-from freightcase.graph import State, build_graph, execute
+from freightcase.graph import State, build_graph, checkpoint_serde, execute
 from freightcase.schemas import QuoteRequest
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
@@ -59,7 +59,9 @@ def fake_graph(
     executor = StubToolExecutor()
     model = GenericFakeChatModel(messages=iter([classification, *model_responses]))
     graph = build_graph(
-        executor=executor, checkpointer=InMemorySaver(), model=model
+        executor=executor,
+        checkpointer=InMemorySaver(serde=checkpoint_serde()),
+        model=model,
     )
     return graph, executor
 
@@ -68,7 +70,9 @@ def fake_graph(
 def live_graph():
     """A graph against the real local model, with its own executor."""
     executor = StubToolExecutor()
-    graph = build_graph(executor=executor, checkpointer=InMemorySaver())
+    graph = build_graph(
+        executor=executor, checkpointer=InMemorySaver(serde=checkpoint_serde())
+    )
     return graph, executor
 
 
@@ -295,9 +299,7 @@ def test_confirm_remediates_gaps_across_rounds():
     """Approve-with-gaps re-prompts ('confirmed' implies complete), and valid
     edits stick between rounds: fixing one gap per resume must converge, not
     demand the human re-send everything each time."""
-    graph, _ = fake_graph(
-        extraction_json(exclude=("incoterm", "cargo.0.weight"))
-    )
+    graph, _ = fake_graph(extraction_json(exclude=("incoterm", "cargo.0.weight")))
     cfg = config()
 
     # Stage 1: pause with two gaps.

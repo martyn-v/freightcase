@@ -26,7 +26,16 @@ build-backend = "uv_build"
 dev = [
     "langgraph-cli[inmem]>=0.4.31",
     "pytest>=9.1.1",
+    "ruff>=0.16.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Defaults (pyflakes + pycodestyle errors) plus import sorting and
+# modern-syntax upgrades.
+extend-select = ["I", "UP"]

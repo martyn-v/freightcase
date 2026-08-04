@@ -15,12 +15,12 @@ from freightcase.schemas import (
 
 def make_quote_request(**overrides: Any) -> QuoteRequest:
     """A complete, quotable request; tests override the field under test."""
-    fields: dict[str, Any] = dict(
-        mode="air",
-        origin=Location(name="Bogota", locode="COBOG", iata="BOG"),
-        destination=Location(name="Panama City", locode="PAPTY", iata="PTY"),
-        incoterm=Incoterm(rule="DAP", named_place="Panama City"),
-        cargo=[
+    fields: dict[str, Any] = {
+        "mode": "air",
+        "origin": Location(name="Bogota", locode="COBOG", iata="BOG"),
+        "destination": Location(name="Panama City", locode="PAPTY", iata="PTY"),
+        "incoterm": Incoterm(rule="DAP", named_place="Panama City"),
+        "cargo": [
             CargoLine(
                 description="Packed foodstuffs",
                 hs_code_hint=None,
@@ -29,7 +29,7 @@ def make_quote_request(**overrides: Any) -> QuoteRequest:
                 dimensions=Dimensions(length=120, width=80, height=75, unit="cm"),
             )
         ],
-    )
+    }
     fields.update(overrides)
     return QuoteRequest(**fields)
 

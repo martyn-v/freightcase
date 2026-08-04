@@ -2,7 +2,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-
 Specialization = Literal["quote_request"]
 Specialist = Literal["quote_specialist"]
 

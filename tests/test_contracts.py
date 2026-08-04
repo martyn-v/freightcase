@@ -2,9 +2,9 @@ import pytest
 from pydantic import ValidationError
 
 from freightcase.contracts import (
-    Confirmed,
     ConfirmationPayload,
     ConfirmationResume,
+    Confirmed,
     EditError,
     Rejected,
     Reprompt,

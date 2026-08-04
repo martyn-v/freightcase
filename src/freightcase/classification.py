@@ -1,8 +1,9 @@
 import json
-from pydantic import BaseModel, ValidationError
 from typing import Literal
+
+from langchain.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
-from langchain.messages import SystemMessage, HumanMessage
+from pydantic import BaseModel, ValidationError
 
 from freightcase.llm import default_model
 from freightcase.validation import summarize_validation_error
