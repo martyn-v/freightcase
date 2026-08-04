@@ -113,7 +113,7 @@ CASES = {
 
 @pytest.mark.parametrize("name", CASES.keys(), ids=CASES.keys())
 def test_extraction(name: str):
-    """Tests the extract_quote_request function against a set of email fixtures and expected outputs."""
+    """Tests extract_specialist_schema against a set of email fixtures and expected outputs."""
     result = extract_specialist_schema(load(name), schema=QuoteRequest).request
 
     expected = CASES[name]

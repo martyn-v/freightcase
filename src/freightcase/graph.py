@@ -18,7 +18,6 @@ from freightcase.classification import (
     classify_email,
 )
 from freightcase.contracts import (
-    TOOL_FOR_FUNCTION,
     ConfirmationPayload,
     ConfirmationResume,
     Confirmed,
@@ -34,6 +33,7 @@ from freightcase.execution import (
 )
 from freightcase.extraction import ExtractionError, extract_specialist_schema
 from freightcase.intake import EmailAddress, EmailAttachment, IntakeResult, parse_eml
+from freightcase.registry import REGISTRY
 from freightcase.specialists.common import (
     CargoLine,
     Dimensions,
@@ -41,7 +41,6 @@ from freightcase.specialists.common import (
     Location,
     Weight,
 )
-from freightcase.specialists.quote import QuoteRequest
 from freightcase.validation import summarize_validation_error
 
 
@@ -56,38 +55,57 @@ class State(TypedDict):
 def require_current(state: State) -> SpecialistResult:
     if "current" not in state or state["current"] is None:
         raise ValueError(
-            "Current specialist result is missing. Please run extract_quote first."
+            "Current specialist result is missing. Please run the extract node first."
         )
     return state["current"]
 
 
-def extract_quote(state: State, *, model: BaseChatModel | None = None) -> dict:
-    """Extracts the quote request from the intake result and stores it in the state."""
+def extract_node(state: State, *, model: BaseChatModel | None = None) -> dict:
+    """Extract the classified function's schema from the intake result: the
+    concrete schema and its metadata come from the registry, so this node is
+    specialist-agnostic."""
 
     if "intake" not in state or state["intake"] is None:
         raise ValueError("Intake result is missing. Please run intake first.")
 
+    classification = state.get("classification")
+    if classification is None:
+        raise ValueError("Classification result is missing. Please run classify first.")
+    if classification.classification == "unknown":
+        # Routing invariant: classify dead-letters unknowns and routes them
+        # straight to finalize; only registry-routed emails reach extract.
+        raise ValueError("Unknown classification reached extract; routing is broken.")
+
+    registry_entry = REGISTRY[classification.classification]
+
     try:
         result = extract_specialist_schema(
-            state["intake"].body_text, schema=QuoteRequest, model=model, max_repairs=1
+            state["intake"].body_text,
+            schema=registry_entry.schema,
+            model=model,
+            max_repairs=1,
         )
 
     except ExtractionError as e:
         return {
             "current": SpecialistResult(
-                function="quote_request", status="failed", error=str(e), output=None
+                function=classification.classification,
+                status="failed",
+                error=str(e),
+                output=None,
             )
         }
 
     warnings = []
     if result.attempts > 1:
         warnings.append(
-            f"Model required {result.attempts} attempts to produce a valid quote request."
+            f"Model required {result.attempts} attempts to produce a valid "
+            f"{classification.classification}."
         )
 
     return {
         "current": SpecialistResult(
-            function="quote_request",
+            function=classification.classification,
             output=result.request,
             status="extracted",
             missing=result.request.missing_for_execution(),
@@ -216,7 +234,7 @@ def execute(state: State, *, executor: ToolExecutor) -> dict:
         # TOOL_FOR_FUNCTION is the same mapping from_result used to build the
         # displayed action: what the human approved is what runs.
         result = executor.execute(
-            TOOL_FOR_FUNCTION[current.function], current.output.model_dump()
+            REGISTRY[current.function].tool, current.output.model_dump()
         )
         return {
             "current": current.model_copy(
@@ -294,8 +312,11 @@ CHECKPOINT_ALLOWED_TYPES: list[type] = [
     EmailAttachment,
     IntakeResult,
     SpecialistResult,
-    # Everything reachable from SpecialistResult.output:
-    QuoteRequest,
+    # Specialist schemas come from the registry; a specialist with nested
+    # models outside specialists.common must get them registered too (future:
+    # a checkpoint_types field on RegistryEntry).
+    *(entry.schema for entry in REGISTRY.values()),
+    # Shared freight vocabulary nested inside those schemas:
     CargoLine,
     Weight,
     Dimensions,
@@ -318,7 +339,7 @@ def build_graph(
     module-level `graph` compiles bare."""
 
     quote_specialist_builder = StateGraph(State)
-    quote_specialist_builder.add_node("extract", partial(extract_quote, model=model))
+    quote_specialist_builder.add_node("extract", partial(extract_node, model=model))
     quote_specialist_builder.add_node("confirm", confirm)
     quote_specialist_builder.add_node("execute", partial(execute, executor=executor))
     quote_specialist_builder.add_edge(START, "extract")

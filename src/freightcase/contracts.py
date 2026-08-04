@@ -6,13 +6,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, SerializeAsAny, ValidationError, model_validator
 
-from freightcase.registry import REGISTRY
+from freightcase.registry import REGISTRY, Specialization
 from freightcase.specialists.base import FieldConfidence, SpecialistSchema
 from freightcase.validation import summarize_validation_error
 
 
 class SpecialistResult(BaseModel):
-    function: Literal["quote_request"] | None
+    function: Specialization | None
     # SerializeAsAny: a field typed by the abstract base would otherwise
     # serialize only base-class fields (i.e. nothing) — dump the concrete
     # instance's full data instead.
@@ -42,18 +42,9 @@ class SpecialistResult(BaseModel):
         return data
 
 
-# Which MCP tool executes each specialist function. Single source of truth:
-# from_result derives the displayed action from it and the execute node calls
-# through it, so what the human approves is what runs. Grows into the
-# specialist registry.
-TOOL_FOR_FUNCTION: dict[str, Literal["create_quote"]] = {
-    "quote_request": "create_quote",
-}
-
-
 class ConfirmationAction(BaseModel):
-    tool: Literal["create_quote"]
-    function: Literal["quote_request"]
+    tool: str
+    function: Specialization
 
 
 class EditError(ValueError):
@@ -215,7 +206,7 @@ class ConfirmationPayload(BaseModel):
             )
         return ConfirmationPayload(
             action=ConfirmationAction(
-                tool=TOOL_FOR_FUNCTION[result.function], function=result.function
+                tool=REGISTRY[result.function].tool, function=result.function
             ),
             summary=result.output.summarize(),
             fields=result.output.model_dump(),
