@@ -1,19 +1,26 @@
+from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel
+from freightcase.specialists.base import SpecialistSchema
+from freightcase.specialists.quote import QuoteRequest
 
 Specialization = Literal["quote_request"]
 Specialist = Literal["quote_specialist"]
 
 
-class RegistryEntry(BaseModel):
+@dataclass(frozen=True)
+class RegistryEntry:
     description: str
-    graph: Specialist
+    subgraph: Specialist
+    tool: str  # the MCP tool the execute node calls — must exist on the TMS server
+    schema: type[SpecialistSchema]
 
 
 REGISTRY: dict[Specialization, RegistryEntry] = {
     "quote_request": RegistryEntry(
         description="Extracts and confirms quote requests from emails.",
-        graph="quote_specialist",
+        subgraph="quote_specialist",
+        tool="create_quote",
+        schema=QuoteRequest,
     )
 }

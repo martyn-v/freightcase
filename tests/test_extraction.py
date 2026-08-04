@@ -7,8 +7,9 @@ from langchain_core.language_models import GenericFakeChatModel
 from freightcase.extraction import (
     ExtractionError,
     _repair_messages,
-    extract_quote_request,
+    extract_specialist_schema,
 )
+from freightcase.specialists.quote import QuoteRequest
 
 MINIMAL_VALID_JSON = json.dumps(
     {
@@ -113,7 +114,7 @@ CASES = {
 @pytest.mark.parametrize("name", CASES.keys(), ids=CASES.keys())
 def test_extraction(name: str):
     """Tests the extract_quote_request function against a set of email fixtures and expected outputs."""
-    result = extract_quote_request(load(name)).request
+    result = extract_specialist_schema(load(name), schema=QuoteRequest).request
 
     expected = CASES[name]
     if "mode" in expected:
@@ -136,7 +137,7 @@ def test_extraction(name: str):
         assert result.incoterm is not None
         assert result.incoterm.rule == expected["incoterm_rule"]
     if "missing_for_quoting" in expected:
-        assert result.missing_for_quoting() == expected["missing_for_quoting"]
+        assert result.missing_for_execution() == expected["missing_for_quoting"]
     if "cargo_0_kg" in expected:
         weight = result.cargo[0].weight
         assert weight is not None
@@ -152,10 +153,12 @@ def test_missing_weights_degrade_not_fail():
     email states no weight or dimensions; extraction succeeds with the gaps
     recorded so HITL can remedy them (rule 3: fatal is for malformed, not
     incomplete)."""
-    result = extract_quote_request(load("quote_missing_weights_en")).request
+    result = extract_specialist_schema(
+        load("quote_missing_weights_en"), schema=QuoteRequest
+    ).request
 
     assert result.cargo[0].weight is None
-    missing = result.missing_for_quoting()
+    missing = result.missing_for_execution()
     assert "cargo.0.weight" in missing
     assert "cargo.0.dimensions" in missing
 
@@ -183,7 +186,9 @@ def test_validation_error_message_names_the_failing_fields():
     fake = GenericFakeChatModel(messages=iter([bad]))
 
     with pytest.raises(ExtractionError) as exc_info:
-        extract_quote_request("irrelevant email body", model=fake, max_repairs=0)
+        extract_specialist_schema(
+            "irrelevant email body", schema=QuoteRequest, model=fake, max_repairs=0
+        )
 
     assert "cargo.0.weight.unit" in str(exc_info.value)
 
@@ -193,7 +198,9 @@ def test_repair_loop_recovers_from_bad_first_attempt():
     fake also proves exactly two invocations happen."""
     fake = GenericFakeChatModel(messages=iter(["not json {{{", MINIMAL_VALID_JSON]))
 
-    outcome = extract_quote_request("irrelevant email body", model=fake)
+    outcome = extract_specialist_schema(
+        "irrelevant email body", schema=QuoteRequest, model=fake
+    )
 
     assert outcome.request.mode == "road"
     assert outcome.request.origin.name == "Bogota"
@@ -206,7 +213,9 @@ def test_repair_exhaustion_raises_last_error():
     fake = GenericFakeChatModel(messages=iter(["not json {{{", "still not json"]))
 
     with pytest.raises(ExtractionError, match="valid JSON"):
-        extract_quote_request("irrelevant email body", model=fake, max_repairs=1)
+        extract_specialist_schema(
+            "irrelevant email body", schema=QuoteRequest, model=fake, max_repairs=1
+        )
 
 
 def test_repair_messages_put_failed_output_in_ai_turn():

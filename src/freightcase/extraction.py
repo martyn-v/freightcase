@@ -5,12 +5,16 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, ValidationError
 
 from freightcase.llm import default_model
-from freightcase.schemas import QuoteRequest
+from freightcase.specialists.base import SpecialistSchema
 from freightcase.validation import summarize_validation_error
 
 
-class ExtractionOutcome(BaseModel):
+class ExtractionOutcome[S: SpecialistSchema](BaseModel):
     """A successful extraction, possibly after repair rounds.
+
+    Generic over the concrete schema: extracting with `schema=QuoteRequest`
+    yields an outcome whose `request` is typed QuoteRequest, so callers keep
+    field-level typing without casts.
 
     `raw` is the parsed dict of the *successful* attempt, pre-validation —
     what the model literally said before validators normalized it. Comparing
@@ -20,13 +24,13 @@ class ExtractionOutcome(BaseModel):
     a string — different thing.)
     """
 
-    request: QuoteRequest
+    request: S
     raw: dict
     attempts: int  # total model invocations; 1 = first try succeeded
 
 
 class ExtractionError(Exception):
-    """Extraction produced no valid QuoteRequest. Carries structured detail
+    """Extraction produced no valid SpecialistSchema. Carries structured detail
     for the repair loop: `raw` is the model's unparseable output as a string
     (unlike ExtractionOutcome.raw, which is a parsed dict)."""
 
@@ -51,8 +55,10 @@ Output compact single-line JSON with no whitespace. Omit optional fields that ar
 """
 
 
-def _attempt(messages: list, model: BaseChatModel) -> tuple[dict, QuoteRequest]:
-    """One model invocation -> validated QuoteRequest. Raises ExtractionError
+def _attempt[S: SpecialistSchema](
+    messages: list, schema: type[S], model: BaseChatModel
+) -> tuple[dict, S]:
+    """One model invocation -> validated SpecialistSchema. Raises ExtractionError
     on invalid JSON (`.raw`) or schema failure (`.validation_error`)."""
     response = model.invoke(messages)
     raw = (
@@ -64,7 +70,7 @@ def _attempt(messages: list, model: BaseChatModel) -> tuple[dict, QuoteRequest]:
         raise ExtractionError(f"Model did not return valid JSON: {e}", raw=raw) from e
 
     try:
-        return data, QuoteRequest.model_validate(data)
+        return data, schema.model_validate(data)
     except ValidationError as e:
         raise ExtractionError(
             f"Extraction failed schema validation: {summarize_validation_error(e)}",
@@ -86,10 +92,13 @@ def _repair_messages(raw: str, error: str) -> list:
     ]
 
 
-def extract_quote_request(
-    email_content: str, model: BaseChatModel | None = None, max_repairs: int = 1
-) -> ExtractionOutcome:
-    """Extract a structured QuoteRequest from raw email text.
+def extract_specialist_schema[S: SpecialistSchema](
+    email_content: str,
+    schema: type[S],
+    model: BaseChatModel | None = None,
+    max_repairs: int = 1,
+) -> ExtractionOutcome[S]:
+    """Extract a structured SpecialistSchema from raw email text.
 
     The model is instructed to transcribe values exactly as stated in the
     email (no unit conversion, no reformatting); all normalization and
@@ -112,7 +121,7 @@ def extract_quote_request(
             model quality instead of pipeline quality).
 
     Returns:
-        An ExtractionOutcome containing the validated QuoteRequest and metadata.
+        An ExtractionOutcome containing the validated SpecialistSchema and metadata.
 
     Raises:
         ExtractionError: The last attempt's failure, once repairs are
@@ -121,17 +130,17 @@ def extract_quote_request(
     """
 
     model = model or default_model()
-    schema = json.dumps(QuoteRequest.model_json_schema())
+    schema_json = json.dumps(schema.model_json_schema())
 
     messages = [
-        SystemMessage(SYSTEM_PROMPT_TEMPLATE.format(schema=schema)),
+        SystemMessage(SYSTEM_PROMPT_TEMPLATE.format(schema=schema_json)),
         HumanMessage(email_content),
     ]
 
     attempts = 0
     while True:
         try:
-            raw, request = _attempt(messages, model)
+            raw, request = _attempt(messages, schema, model)
             return ExtractionOutcome(request=request, raw=raw, attempts=attempts + 1)
         except ExtractionError as e:
             attempts += 1

@@ -2,12 +2,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
-# Per-field provenance: what the human can trust about each extracted value.
-# Deterministic, not model-emitted (rule 1): "normalized" means a validator
-# changed what the model transcribed; "edited" means the value came from the
-# human at the confirmation gate, not from the email at all.
-FieldConfidence = Literal["stated", "normalized", "missing", "edited"]
-
 WeightUnit = Literal["kg", "lb", "t", "g"]
 
 _TO_KG: dict[str, float] = {
@@ -213,90 +207,5 @@ class Location(BaseModel):
             raise ValueError("Location requires at least one of: name, locode, iata")
         return self
 
-
-class QuoteRequest(BaseModel):
-    mode: (
-        Literal["ocean_fcl", "ocean_lcl", "air", "rail", "road", "multimodal"] | None
-    ) = None
-    origin: Location
-    destination: Location
-    incoterm: Incoterm | None = None
-    cargo: list[CargoLine] = Field(
-        min_length=1, description="The cargo lines to be quoted"
-    )
-
-    def missing_for_quoting(self) -> list[str]:
-        """Deterministic completeness check: field paths that are absent from
-        the email but needed to produce a quote. Distinct from schema validity —
-        a request can be valid yet not quotable. Feeds HITL per-field flags."""
-        missing: list[str] = []
-        if self.mode is None:
-            missing.append("mode")
-        # The TMS write needs a LOCODE specifically; a name alone can't
-        # execute, and a stated IATA code is informative context for whoever
-        # supplies the LOCODE at the gate (or a future auto-resolver), never
-        # a substitute. Resolution is downstream of extraction by design.
-        if self.origin.locode is None:
-            missing.append("origin.locode")
-        if self.destination.locode is None:
-            missing.append("destination.locode")
-        if self.incoterm is None:
-            missing.append("incoterm")
-        for i, line in enumerate(self.cargo):
-            if line.pieces is None:
-                missing.append(f"cargo.{i}.pieces")
-            if line.weight is None:
-                missing.append(f"cargo.{i}.weight")
-            # FCL is priced per container; dims implied. Unknown mode: be
-            # conservative and ask for dims.
-            if self.mode != "ocean_fcl" and line.dimensions is None:
-                missing.append(f"cargo.{i}.dimensions")
-        return missing
-
-    def confidence(self, raw_model_output: dict) -> dict[str, FieldConfidence]:
-        """Exhaustive per-field provenance, derived by walking every schema
-        field (computed fields excluded) of this validated request and
-        comparing it to the raw pre-validation dict it was built from
-        (rule 1: the comparison is code, never model judgment).
-
-        Leaf fields get entries ("cargo.0.weight.unit"); a None field is
-        reported "missing" at its own path with no entries beneath it.
-        `raw_model_output` must be the dict this instance was validated
-        from (ExtractionOutcome.raw)."""
-        conf: dict[str, FieldConfidence] = {}
-        _walk_confidence(self, raw_model_output, "", conf)
-        return conf
-
-
-def _walk_confidence(
-    model: BaseModel, raw: dict, prefix: str, conf: dict[str, FieldConfidence]
-) -> None:
-    """Recursive worker for QuoteRequest.confidence(). Declared fields only:
-    model_fields excludes computed fields, which don't exist in raw output."""
-    for name in type(model).model_fields:
-        path = f"{prefix}{name}"
-        value = getattr(model, name)
-        raw_value = raw.get(name) if isinstance(raw, dict) else None
-
-        if value is None:
-            conf[path] = "missing"
-        elif isinstance(value, BaseModel):
-            _walk_confidence(
-                value,
-                raw_value if isinstance(raw_value, dict) else {},
-                f"{path}.",
-                conf,
-            )
-        elif isinstance(value, list):
-            for i, item in enumerate(value):
-                raw_item = (
-                    raw_value[i]
-                    if isinstance(raw_value, list) and i < len(raw_value)
-                    else {}
-                )
-                if isinstance(item, BaseModel):
-                    _walk_confidence(item, raw_item, f"{path}.{i}.", conf)
-                else:
-                    conf[f"{path}.{i}"] = "stated" if item == raw_item else "normalized"
-        else:
-            conf[path] = "stated" if value == raw_value else "normalized"
+    def label(self) -> str:
+        return self.name or self.locode or self.iata or "unknown"

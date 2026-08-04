@@ -11,7 +11,7 @@ from langgraph.types import Command
 from freightcase.contracts import SpecialistResult
 from freightcase.execution import StubToolExecutor, ToolExecutorError
 from freightcase.graph import State, build_graph, checkpoint_serde, execute
-from freightcase.schemas import QuoteRequest
+from freightcase.specialists.quote import QuoteRequest
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
 ROAD_EML = str(FIXTURES / "quote_road_plain_es.eml")

@@ -32,16 +32,16 @@ from freightcase.execution import (
     ToolExecutor,
     ToolExecutorError,
 )
-from freightcase.extraction import ExtractionError, extract_quote_request
+from freightcase.extraction import ExtractionError, extract_specialist_schema
 from freightcase.intake import EmailAddress, EmailAttachment, IntakeResult, parse_eml
-from freightcase.schemas import (
+from freightcase.specialists.common import (
     CargoLine,
     Dimensions,
     Incoterm,
     Location,
-    QuoteRequest,
     Weight,
 )
+from freightcase.specialists.quote import QuoteRequest
 from freightcase.validation import summarize_validation_error
 
 
@@ -68,8 +68,8 @@ def extract_quote(state: State, *, model: BaseChatModel | None = None) -> dict:
         raise ValueError("Intake result is missing. Please run intake first.")
 
     try:
-        result = extract_quote_request(
-            state["intake"].body_text, model=model, max_repairs=1
+        result = extract_specialist_schema(
+            state["intake"].body_text, schema=QuoteRequest, model=model, max_repairs=1
         )
 
     except ExtractionError as e:
@@ -90,7 +90,7 @@ def extract_quote(state: State, *, model: BaseChatModel | None = None) -> dict:
             function="quote_request",
             output=result.request,
             status="extracted",
-            missing=result.request.missing_for_quoting(),
+            missing=result.request.missing_for_execution(),
             confidence=result.request.confidence(result.raw),
             warnings=warnings,
         )
@@ -182,7 +182,7 @@ def confirm(state: State) -> dict:
             current.model_copy(
                 update={
                     "output": output,
-                    "missing": output.missing_for_quoting(),
+                    "missing": output.missing_for_execution(),
                     "confidence": overlay_edited(current.confidence, applied),
                 }
             )

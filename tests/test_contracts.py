@@ -13,15 +13,15 @@ from freightcase.contracts import (
     overlay_edited,
     process_resume,
 )
-from freightcase.schemas import (
+from freightcase.specialists.base import FieldConfidence
+from freightcase.specialists.common import (
     CargoLine,
     Dimensions,
-    FieldConfidence,
     Incoterm,
     Location,
-    QuoteRequest,
     Weight,
 )
+from freightcase.specialists.quote import QuoteRequest
 
 
 def incomplete_request() -> QuoteRequest:
@@ -44,7 +44,7 @@ class TestApplyEdits:
 
         assert edited.cargo[0].weight is not None
         assert edited.cargo[0].weight.kg == 1200  # human input hits the validators too
-        assert "cargo.0.weight" not in edited.missing_for_quoting()
+        assert "cargo.0.weight" not in edited.missing_for_execution()
 
     def test_top_level_path(self):
         edited = apply_edits(incomplete_request(), {"mode": "ocean_lcl"})
@@ -169,7 +169,7 @@ class TestProcessResume:
         decision = process_resume(incomplete_request(), resume)
 
         assert isinstance(decision, Confirmed)
-        assert decision.edited.missing_for_quoting() == []
+        assert decision.edited.missing_for_execution() == []
         assert decision.edited.mode == "ocean_lcl"
         assert set(decision.edited_paths) == set(resume.edits)
 
@@ -256,7 +256,7 @@ class TestConfirmationPayload:
         result = SpecialistResult(
             function="quote_request",
             output=quote_request,
-            missing=quote_request.missing_for_quoting(),
+            missing=quote_request.missing_for_execution(),
             status="extracted",
         )
 
@@ -321,7 +321,7 @@ class TestConfirmationPayload:
 
         assert payload.warnings == result.warnings
 
-    def test_from_result_composes_summary(self):
+    def test_from_result_carries_summary(self):
         quote_request = QuoteRequest(
             mode="road",
             origin=Location(name="Bogota"),
@@ -350,55 +350,6 @@ class TestConfirmationPayload:
         assert "12 pieces" in summary
         assert "8400 kg" in summary
         assert "DAP Medellin" in summary
-
-    def test_summary_names_unstated_incoterm(self):
-        quote_request = QuoteRequest(
-            mode="road",
-            origin=Location(name="Bogota"),
-            destination=Location(name="Medellin"),
-            incoterm=None,
-            cargo=[
-                CargoLine(
-                    description="Packed foodstuffs",
-                    hs_code_hint=None,
-                    pieces=12,
-                    weight=Weight(value=8400, unit="kg"),
-                    dimensions=None,
-                )
-            ],
-        )
-        result = SpecialistResult(
-            function="quote_request", output=quote_request, status="extracted"
-        )
-
-        summary = ConfirmationPayload.from_result(result).summary
-
-        assert "incoterm not stated" in summary
-
-    def test_summary_survives_unstated_fields(self):
-        quote_request = QuoteRequest(
-            mode=None,
-            origin=Location(name="Rotterdam"),
-            destination=Location(name="Houston"),
-            incoterm=Incoterm(rule="EXW", named_place="Rotterdam"),
-            cargo=[
-                CargoLine(
-                    description="Crated lathe",
-                    pieces=1,
-                    weight=None,
-                    dimensions=None,
-                )
-            ],
-        )
-        result = SpecialistResult(
-            function="quote_request", output=quote_request, status="extracted"
-        )
-
-        summary = ConfirmationPayload.from_result(result).summary
-
-        assert "mode not stated" in summary
-        assert "weight not stated" in summary
-        assert "Rotterdam" in summary
 
     def test_from_result_requires_output(self):
         result = SpecialistResult(

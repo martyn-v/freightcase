@@ -4,21 +4,42 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, SerializeAsAny, ValidationError, model_validator
 
-from freightcase.schemas import FieldConfidence, Location, QuoteRequest
+from freightcase.registry import REGISTRY
+from freightcase.specialists.base import FieldConfidence, SpecialistSchema
 from freightcase.validation import summarize_validation_error
 
 
 class SpecialistResult(BaseModel):
     function: Literal["quote_request"] | None
-    output: QuoteRequest | None
+    # SerializeAsAny: a field typed by the abstract base would otherwise
+    # serialize only base-class fields (i.e. nothing) — dump the concrete
+    # instance's full data instead.
+    output: SerializeAsAny[SpecialistSchema] | None
     missing: list[str] = []
     confidence: dict[str, FieldConfidence] = {}
     status: Literal["extracted", "confirmed", "executed", "rejected", "failed"]
     warnings: list[str] = []
     error: str | None = None
     execution_ref: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _rehydrate_output(cls, data: Any) -> Any:
+        """Checkpoint restore hands us dumped dicts, and pydantic can't pick
+        a concrete class for the abstract `output` field. The envelope carries
+        its own discriminator — `function` — so resolve the schema through
+        the registry and validate the dict back into the real model."""
+        if isinstance(data, dict):
+            output = data.get("output")
+            function = data.get("function")
+            if isinstance(output, dict) and function in REGISTRY:
+                data = {
+                    **data,
+                    "output": REGISTRY[function].schema.model_validate(output),
+                }
+        return data
 
 
 # Which MCP tool executes each specialist function. Single source of truth:
@@ -74,7 +95,7 @@ def _set_path(data: Any, path: str, value: Any) -> None:
             )
 
 
-def apply_edits(original: QuoteRequest, edits: dict[str, Any]) -> QuoteRequest:
+def apply_edits[S: SpecialistSchema](original: S, edits: dict[str, Any]) -> S:
     """Apply human edits keyed by dotted field paths — the same vocabulary as
     missing_for_quoting() and confidence — then re-validate the whole object.
     The human is untrusted input like the model (rule 1): a bad value raises
@@ -82,7 +103,7 @@ def apply_edits(original: QuoteRequest, edits: dict[str, Any]) -> QuoteRequest:
     data = original.model_dump()
     for path, value in edits.items():
         _set_path(data, path, value)
-    return QuoteRequest.model_validate(data)
+    return type(original).model_validate(data)
 
 
 @dataclass(frozen=True)
@@ -91,30 +112,32 @@ class Rejected:
 
 
 @dataclass(frozen=True)
-class Reprompt:
+class Reprompt[S: SpecialistSchema]:
     """Ask the human again. `problems` says why; `output` is the request the
     next round starts from (original if the edits were rejected wholesale,
     edited if they were valid but left gaps). `edited_paths` are the edit
     paths actually applied this round — empty when edits were rejected."""
 
     problems: list[str]
-    output: QuoteRequest
+    output: S
     edited_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
-class Confirmed:
+class Confirmed[S: SpecialistSchema]:
     """Approved and complete; `edited` is the final validated request and
     `edited_paths` the edit paths applied in the approving answer."""
 
-    edited: QuoteRequest
+    edited: S
     edited_paths: tuple[str, ...] = ()
 
 
 ConfirmDecision = Rejected | Reprompt | Confirmed
 
 
-def process_resume(output: QuoteRequest, resume: ConfirmationResume) -> ConfirmDecision:
+def process_resume(
+    output: SpecialistSchema, resume: ConfirmationResume
+) -> ConfirmDecision:
     """Decide what one human answer means for the confirmation loop.
 
     Pure function — no interrupt, no state — so every branch is unit-testable.
@@ -136,7 +159,7 @@ def process_resume(output: QuoteRequest, resume: ConfirmationResume) -> ConfirmD
     except ValidationError as e:
         return Reprompt(problems=[summarize_validation_error(e)], output=output)
 
-    missing = edited.missing_for_quoting()
+    missing = edited.missing_for_execution()
     if missing:
         return Reprompt(
             problems=[f"Still missing: {', '.join(missing)}"],
@@ -163,31 +186,6 @@ def overlay_edited(
     for p in paths:
         out[p] = "edited"
     return out
-
-
-def _location_label(location: Location) -> str:
-    return location.name or location.locode or location.iata or "unknown"
-
-
-def _summarize_quote_request(request: QuoteRequest) -> str:
-    """One sentence stating what confirming will execute. Composed here so
-    every surface shows the same truth; totals use canonical kg. Unstated
-    fields are named as gaps, never omitted — the human must see them."""
-    mode = request.mode or "mode not stated"
-    stated_pieces = [line.pieces for line in request.cargo if line.pieces is not None]
-    pieces = f"{sum(stated_pieces)} pieces" if stated_pieces else "pieces not stated"
-    stated_kg = [line.weight.kg for line in request.cargo if line.weight is not None]
-    kg = f"{sum(stated_kg):g} kg" if stated_kg else "weight not stated"
-    incoterm = (
-        f"{request.incoterm.rule} {request.incoterm.named_place}"
-        if request.incoterm is not None
-        else "incoterm not stated"
-    )
-    return (
-        f"Create a quote request: {mode}, "
-        f"{_location_label(request.origin)} → {_location_label(request.destination)}, "
-        f"{pieces}, {kg}, {incoterm}."
-    )
 
 
 class ConfirmationPayload(BaseModel):
@@ -219,7 +217,7 @@ class ConfirmationPayload(BaseModel):
             action=ConfirmationAction(
                 tool=TOOL_FOR_FUNCTION[result.function], function=result.function
             ),
-            summary=_summarize_quote_request(result.output),
+            summary=result.output.summarize(),
             fields=result.output.model_dump(),
             missing=result.missing,
             confidence=result.confidence,
