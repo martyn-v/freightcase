@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from freightcase!")
+"""Freightcase: a case file for every freight email."""

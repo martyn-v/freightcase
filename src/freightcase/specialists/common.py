@@ -166,7 +166,7 @@ class Dimensions(BaseModel):
 
 class CargoLine(BaseModel):
     """Absence is degraded, not fatal (rule 3): unstated pieces/weight/dims
-    extract as None and surface via missing_for_quoting() for HITL remedy.
+    extract as None and surface via missing_for_execution() for HITL remedy.
     Schema validation polices form (bad units, negative values), not absence."""
 
     description: str

@@ -88,7 +88,7 @@ def _set_path(data: Any, path: str, value: Any) -> None:
 
 def apply_edits[S: SpecialistSchema](original: S, edits: dict[str, Any]) -> S:
     """Apply human edits keyed by dotted field paths — the same vocabulary as
-    missing_for_quoting() and confidence — then re-validate the whole object.
+    missing_for_execution() and confidence — then re-validate the whole object.
     The human is untrusted input like the model (rule 1): a bad value raises
     ValidationError, a bad path raises EditError; nothing is silently dropped."""
     data = original.model_dump()
@@ -138,7 +138,7 @@ def process_resume(
       the whole batch (the human retries from what they saw, no partial state).
     - Valid-but-incomplete answers keep the applied edits (`output` in the
       Reprompt) so multi-round remediation converges.
-    - Confirmed implies complete: missing_for_quoting() must be empty.
+    - Confirmed implies complete: missing_for_execution() must be empty.
     """
     if not resume.approved:
         return Rejected()

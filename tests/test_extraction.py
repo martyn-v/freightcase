@@ -88,7 +88,7 @@ CASES = {
         "destination_iata": "MEX",
         "cargo_0_pieces": 10,
         "cargo_0_kg": pytest.approx(250.0),
-        "missing_for_quoting": ["origin.locode", "destination.locode", "incoterm"],
+        "missing_for_execution": ["origin.locode", "destination.locode", "incoterm"],
     },
     "quote_imperial_units": {
         "origin_locode": None,
@@ -136,8 +136,8 @@ def test_extraction(name: str):
     if "incoterm_rule" in expected:
         assert result.incoterm is not None
         assert result.incoterm.rule == expected["incoterm_rule"]
-    if "missing_for_quoting" in expected:
-        assert result.missing_for_execution() == expected["missing_for_quoting"]
+    if "missing_for_execution" in expected:
+        assert result.missing_for_execution() == expected["missing_for_execution"]
     if "cargo_0_kg" in expected:
         weight = result.cargo[0].weight
         assert weight is not None
