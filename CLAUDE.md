@@ -42,7 +42,8 @@ Specialists are self-contained subgraphs registered behind a small registry; add
 - `src/freightcase/tms_stub.py` — demo MCP server standing in for the adopter's TMS
 - `src/freightcase/evals.py` — framework-free eval core (case loader, staged runners, scorers); thin runners in `scripts/`
 - `src/freightcase/llm.py` — model construction (`default_model`, `model_from_spec`)
-- `src/freightcase/graph.py` — state, nodes, wiring only; nodes are thin wrappers over plain functions
+- `src/freightcase/graph.py` — state, nodes, wiring, and checkpointer-level helpers (`checkpoint_serde`, `pending_interrupts`); nodes are thin wrappers over plain functions
+- `src/freightcase/server.py` — reference FastAPI deployment (`/ingest`, `/pending`, `/confirm`) over a SQLite checkpointer; run with `uv run fastapi dev src/freightcase/server.py`
 - `tests/` at root, src-layout imports through the installed package
 
 ## Core design rules (enforce these in all code)
@@ -72,7 +73,8 @@ Specialists are self-contained subgraphs registered behind a small registry; add
 - The cargo list field on `QuoteRequest` is named `cargo`
 - Fixtures use invented parties and .example domains only; no real customer data ever, including in git history
 - Fixture-driven tests with partial expectations: each test module has a `CASES` dict asserting only the fields that matter per scenario. `.eml` fixtures exercise intake, `.txt` fixtures exercise extraction. Header/edge-case tests mutate a loaded `.eml` in memory rather than adding fixture variants.
-- Graph tests: journey tests (one flow per test, staged comments) + direct node-call tests; `fake_graph(*responses)` scripts the model deterministically (classification response is prepended — the classify node consumes the first one). GenericFakeChatModel raises StopIteration when its message iterator exhausts — script one response per expected model call, including repair rounds.
+- Checkpointer enumeration must exhaust `checkpointer.list()` before any `get_state` call: SqliteSaver's list generator holds a non-reentrant lock until consumed, and interleaving deadlocks. Use/extend `pending_interrupts` (graph.py); pinned by a bounded-thread test in test_graph.py.
+- Graph tests: journey tests (one flow per test, staged comments) + direct node-call tests; `fake_graph(*responses)` (in `tests/conftest.py`, with `extraction_json`) scripts the model deterministically (classification response is prepended — the classify node consumes the first one). GenericFakeChatModel raises StopIteration when its message iterator exhausts — script one response per expected model call, including repair rounds.
 - Evals ≠ tests: evals count (fraction of expectations met), tests gate. Eval cases live in `evals/cases/` as `.eml`/`.txt` + `.expected.json` sidecars; dotted-path vocabulary shared with `missing`/`confidence`/edits.
 - Dev-only deps go in the `dev` dependency group; `logs/` is gitignored runtime output.
 - Procedural/instructional prose follows ASD-STE100-style discipline: sentences ≤20 words, one instruction per sentence, imperative, active voice, no metaphor. Applies to README how-to sections and to source-code comments. Narrative README sections (pitch, What to look at, Design decisions) are exempt — they are persuasion, not procedure.

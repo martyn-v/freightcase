@@ -41,7 +41,11 @@ def main() -> int:
 
     cases = load_cases(Path(args.cases))
     stages = STAGES if args.stage == "all" else (args.stage,)
-    artifact: dict = {"model": model_label, "max_repairs": args.max_repairs, "stages": {}}
+    artifact: dict = {
+        "model": model_label,
+        "max_repairs": args.max_repairs,
+        "stages": {},
+    }
 
     for stage in stages:
         stage_cases = cases_for_stage(cases, stage)

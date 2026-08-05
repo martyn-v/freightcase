@@ -48,8 +48,7 @@ def classification_system_prompt() -> str:
         f'- "{function}": {entry.description}' for function, entry in REGISTRY.items()
     )
     options += (
-        '\n- "unknown": none of the above apply; '
-        "explain briefly in the `reason` field."
+        '\n- "unknown": none of the above apply; explain briefly in the `reason` field.'
     )
     schema = json.dumps(ClassificationOutcome.model_json_schema())
     return SYSTEM_PROMPT_TEMPLATE.format(options=options, schema=schema)

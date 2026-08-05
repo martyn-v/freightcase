@@ -8,6 +8,7 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 from mcp import StdioServerParameters
 from pydantic import ValidationError
@@ -367,6 +368,37 @@ def build_graph(
     builder.add_edge("finalize", END)
 
     return builder.compile(checkpointer=checkpointer)
+
+
+def pending_interrupts(graph: CompiledStateGraph) -> list[tuple[str, dict]]:
+    """Enumerate threads paused at an interrupt as (thread_id, value) pairs.
+
+    Lives here, not in a consumer, because it encodes checkpointer
+    mechanics: checkpointer.list() must be exhausted BEFORE the first
+    get_state() call. SqliteSaver.list is a generator that holds the
+    saver's non-reentrant lock until fully consumed, and get_state()
+    acquires the same lock — interleaving the two deadlocks the thread.
+    dict.fromkeys dedupes thread ids and keeps newest-first order.
+
+    Cost is O(total checkpoint history) per call: fine for a demo or a
+    small queue; put a case index in front of it before it meets scale.
+    """
+    checkpointer = graph.checkpointer
+    if not isinstance(checkpointer, BaseCheckpointSaver):
+        # TRY004 suppressed: a checkpointer-less graph is a usage error
+        # (build_graph was called bare), not an argument-type mistake.
+        raise ValueError(  # noqa: TRY004
+            "pending_interrupts requires a graph with a checkpointer"
+        )
+    thread_ids = dict.fromkeys(
+        cp.config.get("configurable", {})["thread_id"] for cp in checkpointer.list(None)
+    )
+    pending: list[tuple[str, dict]] = []
+    for thread_id in thread_ids:
+        state = graph.get_state({"configurable": {"thread_id": thread_id}})
+        if state.interrupts:
+            pending.append((thread_id, state.interrupts[0].value))
+    return pending
 
 
 graph = build_graph(

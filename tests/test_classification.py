@@ -20,6 +20,7 @@ def test_system_prompt_is_built_from_the_registry():
         assert entry.description in prompt
     assert '"unknown"' in prompt
 
+
 CASES = {
     "quote": {
         "subject": "Request for quote",

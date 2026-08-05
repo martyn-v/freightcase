@@ -1,69 +1,30 @@
 import json
+import sqlite3
+import threading
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from conftest import extraction_json, fake_graph
 from langchain_core.language_models import GenericFakeChatModel
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from freightcase.contracts import SpecialistResult
 from freightcase.execution import StubToolExecutor, ToolExecutorError
-from freightcase.graph import State, build_graph, checkpoint_serde, execute
+from freightcase.graph import (
+    State,
+    build_graph,
+    checkpoint_serde,
+    execute,
+    pending_interrupts,
+)
 from freightcase.specialists.quote import QuoteRequest
 
 FIXTURES = Path(__file__).parent / "fixtures" / "emails"
 ROAD_EML = str(FIXTURES / "quote_road_plain_es.eml")
-
-
-def extraction_json(*, exclude: tuple[str, ...] = ()) -> str:
-    """A complete road-freight extraction (the Rotterdam lathe); `exclude`
-    removes dotted paths to create the specific gap a test is about."""
-    data: dict = {
-        "mode": "road",
-        "origin": {"name": "Rotterdam", "locode": "NLRTM"},
-        "destination": {"name": "Houston", "locode": "USHOU"},
-        "incoterm": {"rule": "EXW", "named_place": "Rotterdam"},
-        "cargo": [
-            {
-                "description": "Crated lathe",
-                "pieces": 1,
-                "weight": {"value": 950, "unit": "kg"},
-                "dimensions": {
-                    "length": 200,
-                    "width": 120,
-                    "height": 150,
-                    "unit": "cm",
-                },
-            }
-        ],
-    }
-    for path in exclude:
-        target = data
-        parts = path.split(".")
-        for part in parts[:-1]:
-            target = target[int(part)] if isinstance(target, list) else target[part]
-        del target[parts[-1]]
-    return json.dumps(data)
-
-
-def fake_graph(
-    *model_responses: str,
-    classification: str = '{"classification": "quote_request"}',
-):
-    """A graph with a scripted model and its own stub executor: fully
-    deterministic, no LLM, no shared state between tests. The classify node
-    consumes the model's first response, so a classification is prepended;
-    override it to script the unknown/dead-letter route."""
-    executor = StubToolExecutor()
-    model = GenericFakeChatModel(messages=iter([classification, *model_responses]))
-    graph = build_graph(
-        executor=executor,
-        checkpointer=InMemorySaver(serde=checkpoint_serde()),
-        model=model,
-    )
-    return graph, executor
 
 
 @pytest.fixture
@@ -451,3 +412,39 @@ def test_execute_node_refuses_unconfirmed_results():
 
     with pytest.raises(ValueError, match="status 'extracted'"):
         execute(state, executor=StubToolExecutor())
+
+
+# --- pending_interrupts: checkpointer-level enumeration of paused threads ---
+
+
+def test_pending_interrupts_does_not_deadlock_on_sqlite(tmp_path):
+    """pending_interrupts against the real SqliteSaver: its non-reentrant
+    lock deadlocks if list() iteration interleaves with get_state(), which
+    InMemorySaver (no lock) can never catch. Run in a bounded worker so a
+    regression fails the join timeout instead of hanging pytest."""
+    conn = sqlite3.connect(tmp_path / "pending.sqlite", check_same_thread=False)
+    executor = StubToolExecutor()
+    model = GenericFakeChatModel(
+        messages=iter(['{"classification": "quote_request"}', extraction_json()])
+    )
+    graph = build_graph(
+        executor=executor,
+        checkpointer=SqliteSaver(conn, serde=checkpoint_serde()),
+        model=model,
+    )
+    paused = graph.invoke(
+        {"eml_file_path": ROAD_EML},
+        config={"configurable": {"thread_id": "sqlite-thread"}},
+    )
+    assert "__interrupt__" in paused
+
+    results: list = []
+    worker = threading.Thread(
+        target=lambda: results.append(pending_interrupts(graph)), daemon=True
+    )
+    worker.start()
+    worker.join(timeout=10)
+
+    assert results, "pending_interrupts deadlocked on the SqliteSaver lock"
+    (pending,) = results
+    assert [thread_id for thread_id, _ in pending] == ["sqlite-thread"]

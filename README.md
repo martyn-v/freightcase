@@ -178,6 +178,60 @@ MCP server that keeps quotes in memory. Studio runs use the full MCP path:
 client, transport, tool. To connect a real TMS, change one constructor
 argument.
 
+## Serving the pipeline
+
+[`server.py`](src/freightcase/server.py) is the reference deployment: a
+small FastAPI app over the compiled graph with a persistent SQLite
+checkpointer. The HITL pause is durable — the process can restart between
+ingestion and confirmation, and the case picks up where it stopped.
+
+Start the server:
+
+```bash
+uv run fastapi dev src/freightcase/server.py
+```
+
+Open http://127.0.0.1:8000/docs for the interactive API documentation.
+The response schemas there mirror the confirmation contract above.
+
+Walk a case through with curl:
+
+```bash
+# 1. Open a case. The response pauses with the confirmation payload.
+curl -F "file=@tests/fixtures/emails/quote_road_plain_es.eml" localhost:8000/ingest/
+
+# 2. List cases waiting on a human.
+curl localhost:8000/pending/
+
+# 3. Decide the case. Use the thread_id from step 1.
+curl -X POST localhost:8000/confirm/<thread_id> \
+  -H 'content-type: application/json' \
+  -d '{"approved": true, "edits": {"origin.locode": "COBOG", "destination.locode": "COMDE", "cargo.0.dimensions": {"length": 120, "width": 100, "height": 180, "unit": "cm"}}}'
+```
+
+An approval returns `status: "executed"` with the TMS reference. A bad or
+incomplete answer returns the same paused shape again, with `problems`
+naming the reason. Set `FREIGHTCASE_CHECKPOINT_DB` to move the checkpoint
+database (default: `logs/checkpoints.sqlite`).
+
+Known limitations, deliberate at this scope:
+
+- **`/pending` scans the full checkpoint history on every call.** Thread
+  ids only exist inside checkpoints, so enumeration walks every row
+  (`pending_interrupts` in [`graph.py`](src/freightcase/graph.py)). A real
+  deployment would maintain a case index table; the reference keeps the
+  checkpointer as the single source of truth instead.
+- **The TMS write spawns the stub server per call.** Approval drives the
+  full MCP path (client, stdio transport, tool call), but each call
+  starts a fresh `tms_stub` process, so its in-memory quotes do not
+  accumulate across cases. Point `server_command` in `lifespan` at a
+  long-running TMS MCP server to integrate a real system.
+- **No authentication, one process, one SQLite file.** The threadpool +
+  saver-lock combination is safe, but horizontal scaling needs a Postgres
+  checkpointer and an auth layer.
+- **Failed ingests leave orphaned threads** in the checkpoint DB. They
+  never appear in `/pending` and are harmless, but nothing cleans them up.
+
 ## Layout
 
 | Module                                                   | Role                                                                                                             |
@@ -190,6 +244,7 @@ argument.
 | [`extraction.py`](src/freightcase/extraction.py)         | Generic schema extraction with a repair round                                                                    |
 | [`execution.py`](src/freightcase/execution.py)           | `ToolExecutor` protocol; stub and MCP implementations                                                            |
 | [`intake.py`](src/freightcase/intake.py)                 | Deterministic `.eml` parsing; never shown to the model                                                           |
+| [`server.py`](src/freightcase/server.py)                 | Reference HTTP deployment: `/ingest`, `/pending`, `/confirm` over a persistent checkpointer                      |
 | [`evals.py`](src/freightcase/evals.py)                   | Framework-free eval core; runners in [`scripts/`](scripts/)                                                      |
 
 ## Design decisions
@@ -295,8 +350,9 @@ not a crashed run. The starter set in `evals/cases/` shows the format.
 - **Booking specialist** — the proof of the registry's zero-edit claim
 - **Model comparison** — local gemma vs API Haiku across `max_repairs` on/off,
   via the LangSmith runner
-- **Serving surface** — a small FastAPI app (`/ingest`, `/pending`, `/confirm`)
-  over a persistent checkpointer, replacing the dev-only LangGraph server
+- **Server hardening** — the serving surface exists ([`server.py`](src/freightcase/server.py));
+  productionizing it means auth, the MCP executor wired via config, and a
+  case index so `/pending` stops scanning checkpoint history
 - **CI** — GitHub Actions running the deterministic suite, ruff, and pyright
   (with `LANGGRAPH_STRICT_MSGPACK=true` as the serde tripwire). Needs a
   `live` pytest marker first: the live-model tests require Ollama and stay

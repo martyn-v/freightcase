@@ -136,7 +136,9 @@ def cases_for_stage(cases: list[EvalCase], stage: Stage) -> list[EvalCase]:
     if stage == "classification":
         return [c for c in cases if c.kind == "eml" and "classification" in c.expected]
     if stage == "extraction":
-        return [c for c in cases if c.expected.get("fields") or c.expected.get("missing")]
+        return [
+            c for c in cases if c.expected.get("fields") or c.expected.get("missing")
+        ]
     return [c for c in cases if c.kind == "eml"]
 
 
@@ -242,8 +244,8 @@ def _get_path(data: Any, path: str) -> Any:
                 raise ValueError(f"{path}: unknown field {part!r}")
             target = target[part]
         else:
-            # noqa'd TRY004: ValueError is deliberate — scoring catches it
-            # to record a failed check; TypeError would crash the run.
+            # TRY004 suppressed: ValueError is deliberate — scoring catches
+            # it to record a failed check; TypeError would crash the run.
             raise ValueError(  # noqa: TRY004
                 f"{path}: cannot descend into {type(target).__name__}"
             )

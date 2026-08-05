@@ -57,7 +57,9 @@ class TestCasesForStage:
     def test_stage_participation_follows_expectations_and_kind(self):
         labelled_eml = case(kind="eml", classification="unknown")
         fields_txt = case(kind="txt", fields={"mode": "road"})
-        fields_eml = case(kind="eml", classification="quote_request", fields={"mode": "road"})
+        fields_eml = case(
+            kind="eml", classification="quote_request", fields={"mode": "road"}
+        )
         bare_eml = case(kind="eml")
 
         cases = [labelled_eml, fields_txt, fields_eml, bare_eml]
@@ -65,7 +67,11 @@ class TestCasesForStage:
         assert cases_for_stage(cases, "classification") == [labelled_eml, fields_eml]
         assert cases_for_stage(cases, "extraction") == [fields_txt, fields_eml]
         # pipeline takes every full email, labelled or not
-        assert cases_for_stage(cases, "pipeline") == [labelled_eml, fields_eml, bare_eml]
+        assert cases_for_stage(cases, "pipeline") == [
+            labelled_eml,
+            fields_eml,
+            bare_eml,
+        ]
 
     def test_txt_never_classifies(self):
         mislabelled_txt = case(kind="txt", classification="quote_request")
