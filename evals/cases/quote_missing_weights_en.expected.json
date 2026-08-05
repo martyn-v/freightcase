@@ -1,0 +1,8 @@
+{
+  "function": "quote_request",
+  "fields": {
+    "incoterm.rule": "EXW",
+    "cargo.0.pieces": 1
+  },
+  "missing": ["cargo.0.weight", "cargo.0.dimensions"]
+}

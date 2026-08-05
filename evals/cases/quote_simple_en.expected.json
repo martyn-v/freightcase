@@ -1,0 +1,12 @@
+{
+  "function": "quote_request",
+  "fields": {
+    "mode": "ocean_fcl",
+    "origin.locode": "CNSHA",
+    "origin.name": "Shanghai, China",
+    "destination.name": "Cartagena, Colombia",
+    "incoterm.rule": "FOB",
+    "cargo.0.pieces": 18,
+    "cargo.0.weight.kg": 997.903
+  }
+}

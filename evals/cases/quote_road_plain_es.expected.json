@@ -1,0 +1,10 @@
+{
+  "classification": "quote_request",
+  "fields": {
+    "mode": "road",
+    "incoterm.rule": "DAP",
+    "cargo.0.pieces": 12,
+    "cargo.0.weight.kg": 8400
+  },
+  "missing": ["origin.locode", "destination.locode", "cargo.0.dimensions"]
+}
