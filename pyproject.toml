@@ -1,7 +1,7 @@
 [project]
 name = "freightcase"
 version = "0.1.0"
-description = "Add your description here"
+description = "A case file for every freight email: inbox-to-TMS agent with human-confirmed actions"
 readme = "README.md"
 authors = [{ name = "martyn-v", email = "m@rtyn.io" }]
 requires-python = ">=3.12"
