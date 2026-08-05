@@ -76,3 +76,4 @@ Specialists are self-contained subgraphs registered behind a small registry; add
 - Evals ≠ tests: evals count (fraction of expectations met), tests gate. Eval cases live in `evals/cases/` as `.eml`/`.txt` + `.expected.json` sidecars; dotted-path vocabulary shared with `missing`/`confidence`/edits.
 - Dev-only deps go in the `dev` dependency group; `logs/` is gitignored runtime output.
 - Procedural/instructional prose follows ASD-STE100-style discipline: sentences ≤20 words, one instruction per sentence, imperative, active voice, no metaphor. Applies to README how-to sections and to source-code comments. Narrative README sections (pitch, What to look at, Design decisions) are exempt — they are persuasion, not procedure.
+- Commits use Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`; scope optional, e.g. `feat(evals): ...`). Body explains the why; subject stays imperative and ≤72 chars.
