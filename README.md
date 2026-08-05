@@ -195,6 +195,12 @@ not a crashed run. The starter set in `evals/cases/` shows the format.
   only cargo data, no sender: the created quote can't be attributed to a
   client. The submission needs the requesting party (from intake's sender,
   eventually resolved against the TMS's customer records).
+- **PDF attachment handling** — intake already records attachment metadata
+  (see [`quote_fcl_with_attachment_en.eml`](tests/fixtures/emails/quote_fcl_with_attachment_en.eml)),
+  but extraction reads only the body: a packing list or rate sheet in a PDF
+  never reaches the model. In scope for v1 as the one supported attachment
+  type; needs text extraction and a decision on how PDF-sourced values mix
+  with body-sourced provenance.
 - **Eval dataset growth** — high-N classification labels, targeted extraction
   cases (known weak spot: prose numbers, "one industrial lathe" → `pieces: 1`)
 - **Booking specialist** — the proof of the registry's zero-edit claim
