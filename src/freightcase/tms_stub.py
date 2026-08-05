@@ -6,6 +6,8 @@ This is demo/test infrastructure, not part of the pipeline — it exists so
 the real MCPToolExecutor has a real server to talk to.
 """
 
+import json
+import sys
 from itertools import count
 
 from mcp.server.mcpserver import MCPServer
@@ -27,6 +29,9 @@ def create_quote(quote: dict) -> QuoteCreated:
     """Record a quote request and return its TMS reference."""
     reference = f"Q-{next(_references):04d}"
     _quotes[reference] = quote
+    # Log to stderr only. Stdout carries the MCP stdio protocol.
+    print(f"[stub-tms] {reference} received:", file=sys.stderr)
+    print(json.dumps(quote, indent=2, ensure_ascii=False), file=sys.stderr)
     return QuoteCreated(reference=reference, status="created")
 
 
