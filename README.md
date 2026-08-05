@@ -285,6 +285,11 @@ not a crashed run. The starter set in `evals/cases/` shows the format.
   never reaches the model. In scope for v1 as the one supported attachment
   type; needs text extraction and a decision on how PDF-sourced values mix
   with body-sourced provenance.
+- **LOCODE resolver** — a deterministic lookup that proposes UN/LOCODEs from
+  what the email did state (an IATA code, a place name), so the human
+  confirms a suggestion instead of typing `COBOG` from memory. Per rule 1
+  this is code or reference data, never the model; proposed values surface
+  through the existing `missing`/edit flow with their own provenance.
 - **Eval dataset growth** — high-N classification labels, targeted extraction
   cases (known weak spot: prose numbers, "one industrial lathe" → `pieces: 1`)
 - **Booking specialist** — the proof of the registry's zero-edit claim
