@@ -66,19 +66,29 @@ The parts of this codebase that carry engineering weight:
 ## Quickstart
 
 Install [uv](https://docs.astral.sh/uv/) and [Ollama](https://ollama.com).
-Pull the model before you start. The default model is `gemma4:31b`. To use
-a different model, set `AGENT_MODEL` in `.env`.
+Then prepare the model and the environment:
 
 ```bash
+ollama pull gemma4:31b               # the default local model
+cp .env.example .env                 # defaults work as-is; edit to change model or add tracing
 uv sync                              # install dependencies
 uv run pytest                        # run all 147 tests (~50s; some call the live model)
-uv run langgraph dev                 # start LangGraph Studio
-uv run python scripts/run_evals.py   # run the staged evals locally
 ```
 
-In Studio, invoke the graph with an `eml_file_path`. The run stops at the
+To see the pipeline run, start the dev server:
+
+```bash
+uv run langgraph dev                 # local graph server + LangGraph Studio
+```
+
+The command opens the Studio UI in your browser. The UI is hosted at
+`smith.langchain.com` and needs a free LangSmith account — sign in when
+the browser asks. The graph server itself runs on your machine.
+
+In Studio, invoke the graph with an `eml_file_path` (use one from
+[`tests/fixtures/emails/`](tests/fixtures/emails/)). The run stops at the
 confirmation gate. Approve, edit, or reject the case. On approval, the MCP
-write goes to the stub TMS.
+write goes to the stub TMS and its payload prints in the server terminal.
 
 [`tms_stub.py`](src/freightcase/tms_stub.py) is the demo TMS. It is a real
 MCP server that keeps quotes in memory. Studio runs use the full MCP path:
