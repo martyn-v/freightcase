@@ -140,7 +140,7 @@ Then prepare the model and the environment:
 ollama pull gemma4:31b               # the default local model
 cp .env.example .env                 # defaults work as-is; edit to change model or add tracing
 uv sync                              # install dependencies
-uv run pytest                        # run all 147 tests (~50s; some call the live model)
+uv run pytest                        # run the full suite (~1 min; some tests call the live model)
 ```
 
 To see the pipeline run, start the dev server:
@@ -190,7 +190,8 @@ argument.
 
 ## Testing
 
-147 tests in three tiers, in line with how the code is factored:
+The suite (~150 tests) has three tiers, in line with how the code is
+factored:
 
 - **Pure logic** — schema validators, completeness, provenance, the confirm
   loop's decision function, edit application, eval scoring. No I/O, no LLM.
@@ -276,6 +277,12 @@ not a crashed run. The starter set in `evals/cases/` shows the format.
   via the LangSmith runner
 - **Serving surface** — a small FastAPI app (`/ingest`, `/pending`, `/confirm`)
   over a persistent checkpointer, replacing the dev-only LangGraph server
+- **CI** — GitHub Actions running the deterministic suite, ruff, and pyright
+  (with `LANGGRAPH_STRICT_MSGPACK=true` as the serde tripwire). Needs a
+  `live` pytest marker first: the live-model tests require Ollama and stay
+  local.
+- **Typing polish** — parameterize `ConfirmDecision` and `process_resume`
+  so the `Reprompt[S]`/`Confirmed[S]` generics survive the union.
 
 Out of scope by design: `.msg` files, charset heroics, attachment types
 beyond PDF, a third specialist.
