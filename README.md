@@ -50,7 +50,11 @@ source of truth):
   "fields": {
     "mode": "road",
     "origin": { "name": "Bogotá, Colombia", "locode": null, "iata": null },
-    "destination": { "name": "Medellín, Colombia", "locode": null, "iata": null },
+    "destination": {
+      "name": "Medellín, Colombia",
+      "locode": null,
+      "iata": null
+    },
     "incoterm": { "rule": "DAP", "named_place": "Medellín" },
     "cargo": [
       {
@@ -92,7 +96,18 @@ you are being asked again (empty on the first prompt).
 The resume is the human's answer:
 
 ```json
-{ "approved": true, "edits": { "origin.locode": "COBOG", "cargo.0.dimensions": { "length": 120, "width": 100, "height": 180, "unit": "cm" } } }
+{
+  "approved": true,
+  "edits": {
+    "origin.locode": "COBOG",
+    "cargo.0.dimensions": {
+      "length": 120,
+      "width": 100,
+      "height": 180,
+      "unit": "cm"
+    }
+  }
+}
 ```
 
 Edits use the same dotted paths as `missing` and `confidence`, and the
@@ -114,7 +129,7 @@ The parts of this codebase that carry engineering weight:
   fields because type constraints smuggle interpretation into the model.
 - **A crash-proof HITL loop** ([`graph.py`](src/freightcase/graph.py) `confirm`) —
   LangGraph replays cached resume values on retry, so an exception on bad
-  human input wedges a thread *permanently*. Every invalid answer becomes a
+  human input wedges a thread _permanently_. Every invalid answer becomes a
   re-prompt with the reason attached. Found the hard way; pinned by tests.
 - **The specialist registry** ([`registry.py`](src/freightcase/registry.py)) —
   single source for what a function needs: description (builds the
@@ -165,27 +180,27 @@ argument.
 
 ## Layout
 
-| Module | Role |
-| --- | --- |
-| [`graph.py`](src/freightcase/graph.py) | State, nodes, wiring; nodes are thin wrappers over plain functions |
-| [`specialists/`](src/freightcase/specialists/) | `base.py` (the SpecialistSchema ABC), `common.py` (shared freight vocabulary), `quote.py` (the first specialist) |
-| [`registry.py`](src/freightcase/registry.py) | Function → description / subgraph / tool / schema |
-| [`contracts.py`](src/freightcase/contracts.py) | Case record + HITL machinery; imports no specialist module |
-| [`classification.py`](src/freightcase/classification.py) | Email → function, prompt composed from registry descriptions |
-| [`extraction.py`](src/freightcase/extraction.py) | Generic schema extraction with a repair round |
-| [`execution.py`](src/freightcase/execution.py) | `ToolExecutor` protocol; stub and MCP implementations |
-| [`intake.py`](src/freightcase/intake.py) | Deterministic `.eml` parsing; never shown to the model |
-| [`evals.py`](src/freightcase/evals.py) | Framework-free eval core; runners in [`scripts/`](scripts/) |
+| Module                                                   | Role                                                                                                             |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| [`graph.py`](src/freightcase/graph.py)                   | State, nodes, wiring; nodes are thin wrappers over plain functions                                               |
+| [`specialists/`](src/freightcase/specialists/)           | `base.py` (the SpecialistSchema ABC), `common.py` (shared freight vocabulary), `quote.py` (the first specialist) |
+| [`registry.py`](src/freightcase/registry.py)             | Function → description / subgraph / tool / schema                                                                |
+| [`contracts.py`](src/freightcase/contracts.py)           | Case record + HITL machinery; imports no specialist module                                                       |
+| [`classification.py`](src/freightcase/classification.py) | Email → function, prompt composed from registry descriptions                                                     |
+| [`extraction.py`](src/freightcase/extraction.py)         | Generic schema extraction with a repair round                                                                    |
+| [`execution.py`](src/freightcase/execution.py)           | `ToolExecutor` protocol; stub and MCP implementations                                                            |
+| [`intake.py`](src/freightcase/intake.py)                 | Deterministic `.eml` parsing; never shown to the model                                                           |
+| [`evals.py`](src/freightcase/evals.py)                   | Framework-free eval core; runners in [`scripts/`](scripts/)                                                      |
 
 ## Design decisions
 
 - The model transcribes evidence, the code interprets it: the LLM emits values exactly as stated in the source email, and all normalization (unit aliases, incoterm variants, date formats) lives in deterministic validators that fail loudly on unrecognized input, so ambiguity surfaces as a per-field review flag in HITL instead of a silent, confidently wrong conversion.
 - MCP is the integration boundary, not an LLM affordance: by the time execute fires, the human has confirmed a validated payload and deterministic code makes the tool call — no model chooses tools or fills arguments (intelligence ends where writes begin). MCP earns its place as a driver-style contract instead of a bespoke adapter interface: the adopter points freightcase at their own TMS's MCP server exposing `create_quote`, and the pipeline gets typed, discoverable tool schemas with zero TMS-specific code.
-- Absence degrades, form fails: schema validation polices *what was stated* (unknown units, malformed values, invalid JSON stay fatal), while *what wasn't stated* extracts as `None`, is recorded by a deterministic completeness check (`missing_for_execution()`), and surfaces in the confirmation payload for the human to remedy — an incomplete email becomes a conversation, not a dead-letter ticket.
+- Absence degrades, form fails: schema validation polices _what was stated_ (unknown units, malformed values, invalid JSON stay fatal), while _what wasn't stated_ extracts as `None`, is recorded by a deterministic completeness check (`missing_for_execution()`), and surfaces in the confirmation payload for the human to remedy — an incomplete email becomes a conversation, not a dead-letter ticket.
 - No enums in the transcription contract: a `Literal["kg","lb","t","g"]` in the prompt schema pressures the model to convert "toneladas" → "t" — interpretation smuggled in through type constraints. Unit fields are plain strings in the schema the model sees; the alias table normalizes deterministically afterward, keeping the raw transcription available for per-field provenance (stated / normalized / missing / edited) shown to the reviewer.
 - Human input inside an interrupt loop must never raise: LangGraph caches the resume value in the checkpoint and replays it on every retry, so an exception thrown on a malformed resume wedges the thread permanently — no later, corrected answer can ever get through. Every invalid answer (unparseable resume, bad edit path, failed validation, remaining gaps) becomes a re-prompt with the reason attached; the only exits are the human's own approve or reject.
 - The demo fakes the TMS, not the integration: `tms_stub.py` is a real MCP server (in-memory quotes, incrementing references) standing in for the adopter's system, so dev and demo runs exercise the genuine client-transport-tool path end to end — the only pretend layer is the system of record, which a demo was always going to pretend. The in-process `StubToolExecutor` exists one layer up for unit tests, where spawning a server subprocess would be waste; the seam between them is the `ToolExecutor` protocol, which is also exactly where an adopter's real TMS plugs in.
-- The eval core is framework-free; runners on top are disposable: `freightcase/evals.py` owns the case format, the staged pipeline runners, and the deterministic scorers, with zero eval-framework imports — and two thin runners sit on top. `scripts/run_evals.py` is the zero-dependency local runner (the adopter's eval set is their own production emails, which never leave the machine); `scripts/langsmith_evals.py` runs the same cases as LangSmith experiments, the ecosystem-native choice for this LangChain/LangGraph stack, where traces, tokens and model comparisons come free from the tracing already in place. (An earlier iteration used Inspect AI; it was abandoned because Inspect wants to *own* the model layer, and bridging a pipeline that brings its own models took a cross-thread async adapter — framework-fit friction that thick is a design smell. Frameworks that treat the system under test as a function fit; frameworks that want to be its model layer don't.)
+- The eval core is framework-free; runners on top are disposable: `freightcase/evals.py` owns the case format, the staged pipeline runners, and the deterministic scorers, with zero eval-framework imports — and two thin runners sit on top. `scripts/run_evals.py` is the zero-dependency local runner (the adopter's eval set is their own production emails, which never leave the machine); `scripts/langsmith_evals.py` runs the same cases as LangSmith experiments, the ecosystem-native choice for this LangChain/LangGraph stack, where traces, tokens and model comparisons come free from the tracing already in place. (An earlier iteration used Inspect AI; it was abandoned because Inspect wants to _own_ the model layer, and bridging a pipeline that brings its own models took a cross-thread async adapter — framework-fit friction that thick is a design smell. Frameworks that treat the system under test as a function fit; frameworks that want to be its model layer don't.)
 - Evals are staged for attribution: a composite score can't tell a routing failure from an extraction failure, so classification (one cheap call per labelled email — the high-N measurement), extraction (dispatched by the sidecar's declared function, classifier bypassed), and pipeline (classify → extract, the compounding measurement) run and report as separate stages over one case folder. The economics differ by stage — classification labels cost seconds to author, field expectations cost minutes — so the dataset can grow where growth is cheap without diluting the expensive cases.
 
 ## Testing
@@ -281,8 +296,6 @@ not a crashed run. The starter set in `evals/cases/` shows the format.
   (with `LANGGRAPH_STRICT_MSGPACK=true` as the serde tripwire). Needs a
   `live` pytest marker first: the live-model tests require Ollama and stay
   local.
-- **Typing polish** — parameterize `ConfirmDecision` and `process_resume`
-  so the `Reprompt[S]`/`Confirmed[S]` generics survive the union.
 
 Out of scope by design: `.msg` files, charset heroics, attachment types
 beyond PDF, a third specialist.

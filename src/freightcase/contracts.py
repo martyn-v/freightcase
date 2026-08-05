@@ -123,12 +123,12 @@ class Confirmed[S: SpecialistSchema]:
     edited_paths: tuple[str, ...] = ()
 
 
-ConfirmDecision = Rejected | Reprompt | Confirmed
+type ConfirmDecision[S: SpecialistSchema] = Rejected | Reprompt[S] | Confirmed[S]
 
 
-def process_resume(
-    output: SpecialistSchema, resume: ConfirmationResume
-) -> ConfirmDecision:
+def process_resume[S: SpecialistSchema](
+    output: S, resume: ConfirmationResume
+) -> ConfirmDecision[S]:
     """Decide what one human answer means for the confirmation loop.
 
     Pure function — no interrupt, no state — so every branch is unit-testable.
