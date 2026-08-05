@@ -177,6 +177,10 @@ not a crashed run. The starter set in `evals/cases/` shows the format.
 
 ## Roadmap
 
+- **Source email in the confirmation payload** — the interrupt currently
+  shows extracted fields without the email they came from, so a reviewer
+  can't check a value against its source before correcting it. The payload
+  should carry sender, subject, and body alongside the fields.
 - **Eval dataset growth** — high-N classification labels, targeted extraction
   cases (known weak spot: prose numbers, "one industrial lathe" → `pieces: 1`)
 - **Booking specialist** — the proof of the registry's zero-edit claim
