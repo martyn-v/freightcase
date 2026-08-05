@@ -35,6 +35,74 @@ why. Whatever happens, the case lands in `results` with its full record:
 extracted fields, per-field provenance (stated / normalized / missing /
 edited), warnings, the TMS reference or the error.
 
+## The confirmation contract
+
+When a case pauses, the interrupt carries everything a reviewing surface
+needs — no freight knowledge required to render it. This payload is from a
+real run against the bundled Spanish road-freight fixture (`confidence`
+abridged for length; [`contracts.py`](src/freightcase/contracts.py) is the
+source of truth):
+
+```json
+{
+  "action": { "tool": "create_quote", "function": "quote_request" },
+  "summary": "Create a quote request: road, Bogotá, Colombia → Medellín, Colombia, 12 pieces, 8400 kg, DAP Medellín.",
+  "fields": {
+    "mode": "road",
+    "origin": { "name": "Bogotá, Colombia", "locode": null, "iata": null },
+    "destination": { "name": "Medellín, Colombia", "locode": null, "iata": null },
+    "incoterm": { "rule": "DAP", "named_place": "Medellín" },
+    "cargo": [
+      {
+        "description": "estibas de alimentos empacados, no perecederos",
+        "hs_code_hint": null,
+        "pieces": 12,
+        "weight": { "value": 8400.0, "unit": "kg", "kg": 8400.0 },
+        "dimensions": null
+      }
+    ]
+  },
+  "confidence": {
+    "mode": "stated",
+    "origin.name": "stated",
+    "origin.locode": "missing",
+    "destination.name": "stated",
+    "destination.locode": "missing",
+    "incoterm.rule": "stated",
+    "incoterm.named_place": "stated",
+    "cargo.0.pieces": "stated",
+    "cargo.0.weight.value": "stated",
+    "cargo.0.weight.unit": "stated",
+    "cargo.0.dimensions": "missing"
+  },
+  "missing": ["origin.locode", "destination.locode", "cargo.0.dimensions"],
+  "warnings": [],
+  "problems": []
+}
+```
+
+Reading it: `summary` is the sentence above the approve button, composed
+server-side so every surface shows the same truth. `fields` is the full
+extraction with canonical computed values (`weight.kg`) riding along.
+`confidence` is per-field provenance — deterministic, derived by comparing
+the validated model against the model's raw transcription, never
+model-emitted. `missing` lists what blocks execution; `problems` says why
+you are being asked again (empty on the first prompt).
+
+The resume is the human's answer:
+
+```json
+{ "approved": true, "edits": { "origin.locode": "COBOG", "cargo.0.dimensions": { "length": 120, "width": 100, "height": 180, "unit": "cm" } } }
+```
+
+Edits use the same dotted paths as `missing` and `confidence`, and the
+edited object is re-validated in full — the human is untrusted input like
+the model. The loop's rules: an invalid edit or a still-incomplete approval
+re-prompts with `problems` set and accepted progress retained; reject
+always exits; approval only succeeds when nothing is missing, so a
+`confirmed` case is complete by construction. Human-edited fields carry
+`"edited"` provenance into the final record.
+
 ## What to look at
 
 The parts of this codebase that carry engineering weight:
