@@ -6,11 +6,12 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel, ValidationError
 
 from freightcase.llm import default_model
+from freightcase.registry import REGISTRY, Specialization
 from freightcase.validation import summarize_validation_error
 
 
 class ClassificationOutcome(BaseModel):
-    classification: Literal["quote_request", "unknown"]
+    classification: Specialization | Literal["unknown"]
     reason: str | None = None
 
 
@@ -29,21 +30,38 @@ class ClassificationError(Exception):
         self.validation_error = validation_error
 
 
-SYSTEM_PROMPT_TEMPLATE = """You are an inbox assistant that classifies emails. Classify the email as either a "quote_request" or "unknown". If the email is classified as "unknown", provide a brief reason for the classification.
-Return it as a single JSON object matching this JSON Schema exactly. No prose, no markdown fences.
+SYSTEM_PROMPT_TEMPLATE = """You are an inbox assistant that classifies emails into exactly one category:
+
+{options}
+
+Return a single JSON object matching this JSON Schema exactly. No prose, no markdown fences.
 
 {schema}
 """
+
+
+def classification_system_prompt() -> str:
+    """Composed from the registry: registering a specialist teaches the
+    classifier its name (via the Specialization type in the schema enum)
+    and its meaning (via the description here) — no classifier edits."""
+    options = "\n".join(
+        f'- "{function}": {entry.description}' for function, entry in REGISTRY.items()
+    )
+    options += (
+        '\n- "unknown": none of the above apply; '
+        "explain briefly in the `reason` field."
+    )
+    schema = json.dumps(ClassificationOutcome.model_json_schema())
+    return SYSTEM_PROMPT_TEMPLATE.format(options=options, schema=schema)
 
 
 def classify_email(
     email_body: str, email_subject: str, model: BaseChatModel | None = None
 ) -> ClassificationOutcome:
     model = model or default_model()
-    schema = json.dumps(ClassificationOutcome.model_json_schema())
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT_TEMPLATE.format(schema=schema)),
+        SystemMessage(content=classification_system_prompt()),
         HumanMessage(
             content=f"Email subject: {email_subject}\nEmail body: {email_body}"
         ),

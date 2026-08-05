@@ -1,7 +1,24 @@
 import pytest
 from langchain_core.language_models import GenericFakeChatModel
 
-from freightcase.classification import ClassificationError, classify_email
+from freightcase.classification import (
+    ClassificationError,
+    classification_system_prompt,
+    classify_email,
+)
+from freightcase.registry import REGISTRY
+
+
+def test_system_prompt_is_built_from_the_registry():
+    """Registering a specialist must teach the classifier its name AND its
+    meaning: every registry function and its description appear in the
+    prompt, plus the unknown escape hatch. No classifier edits per specialist."""
+    prompt = classification_system_prompt()
+
+    for function, entry in REGISTRY.items():
+        assert f'"{function}"' in prompt
+        assert entry.description in prompt
+    assert '"unknown"' in prompt
 
 CASES = {
     "quote": {
